@@ -49,7 +49,11 @@ def _explain(resp: httpx.Response) -> str:
             return "LinkedIn is throttling comments (1 per minute). Wait a minute and retry."
         return "LinkedIn rate limit hit (150 requests per member per day). Try again later."
     if status == 403:
-        return "LinkedIn denied the request. Check the app has the Share on LinkedIn product."
+        return (
+            "LinkedIn denied the request (403). The token's scopes do not cover this action "
+            "(examples: resharing a connections-only post, posting as an organization), "
+            "or the app lacks the Share on LinkedIn product."
+        )
     if status == 410:
         return (
             "LinkedIn retired this endpoint (the UGC Post API is labelled Legacy). "
@@ -193,20 +197,15 @@ class LinkedInClient:
             json={"actor": self.author, "message": {"text": text}},
         )
 
-    def react(self, post_urn: str, reaction_type: str) -> None:
-        actor = urllib.parse.quote(self.author, safe="")
+    def like(self, post_urn: str) -> None:
+        quoted = urllib.parse.quote(post_urn, safe="")
         self._request(
-            "POST",
-            f"/rest/reactions?actor={actor}",
-            headers=self._rest_headers,
-            json={"root": post_urn, "reactionType": reaction_type},
+            "POST", f"/v2/socialActions/{quoted}/likes", json={"actor": self.author, "object": post_urn}
         )
 
-    def unreact(self, post_urn: str) -> None:
-        actor, entity = (urllib.parse.quote(u, safe="") for u in (self.author, post_urn))
-        self._request(
-            "DELETE", f"/rest/reactions/(actor:{actor},entity:{entity})", headers=self._rest_headers
-        )
+    def unlike(self, post_urn: str) -> None:
+        quoted, actor = (urllib.parse.quote(u, safe="") for u in (post_urn, self.author))
+        self._request("DELETE", f"/v2/socialActions/{quoted}/likes/{actor}?actor={actor}")
 
     def edit_post(self, post_urn: str, text: str) -> None:
         self._request(

@@ -771,16 +771,11 @@
       "openWorldHint": true,
       "title": "React to LinkedIn post"
     },
-    "description": "React to a post (LIKE, PRAISE, EMPATHY, INTEREST, APPRECIATION, ENTERTAINMENT) or remove it.",
+    "description": "Like a post or remove the like. LIKE is the only reaction type available to self-serve apps.",
     "inputSchema": {
       "properties": {
         "post_urn": {
           "title": "Post Urn",
-          "type": "string"
-        },
-        "reaction": {
-          "default": "LIKE",
-          "title": "Reaction",
           "type": "string"
         },
         "remove": {

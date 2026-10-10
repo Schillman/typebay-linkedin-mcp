@@ -20,7 +20,6 @@ from .safety import (
     parse_mentions,
     validate_images,
     validate_link,
-    validate_reaction,
     validate_text,
     validate_video,
     validate_visibility,
@@ -398,15 +397,14 @@ def linkedin_delete_post(post_urn: str, confirm: bool = False) -> DeleteResult:
         title="React to LinkedIn post", destructive_hint=False, idempotent_hint=True, open_world_hint=True
     )
 )
-def linkedin_react_to_post(post_urn: str, reaction: str = "LIKE", remove: bool = False) -> ReactionResult:
-    """React to a post (LIKE, PRAISE, EMPATHY, INTEREST, APPRECIATION, ENTERTAINMENT) or remove it."""
-    reaction = validate_reaction(reaction)
+def linkedin_react_to_post(post_urn: str, remove: bool = False) -> ReactionResult:
+    """Like a post or remove the like. LIKE is the only reaction type available to self-serve apps."""
     client = _client()
     if remove:
-        client.unreact(post_urn)
+        client.unlike(post_urn)
     else:
-        client.react(post_urn, reaction)
-    out: ReactionResult = {"reacted": not remove, "reaction": reaction, "urn": post_urn}
+        client.like(post_urn)
+    out: ReactionResult = {"reacted": not remove, "reaction": "LIKE", "urn": post_urn}
     if not postlog.known(post_urn):
         out["note"] = NOT_LOGGED
     return out

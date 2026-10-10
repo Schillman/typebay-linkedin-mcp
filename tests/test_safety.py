@@ -10,7 +10,6 @@ from typebay_linkedin_mcp.safety import (
     lint_text,
     parse_mentions,
     validate_images,
-    validate_reaction,
     validate_text,
     validate_video,
 )
@@ -138,15 +137,6 @@ def test_plain_token_pinned_and_reshare_changes_it():
         == hashlib.sha256(b'{"i": [], "l": null, "t": "hi", "v": "PUBLIC", "vid": null}').hexdigest()[:16]
     )
     assert confirm_token("hi", [], "PUBLIC", reshare_of="urn:li:share:1") != confirm_token("hi", [], "PUBLIC")
-
-
-def test_validate_reaction():
-    assert validate_reaction("like") == "LIKE"
-    for bad in ("MAYBE", "", "LOVE"):
-        with pytest.raises(
-            ValidationError, match="LIKE, PRAISE, EMPATHY, INTEREST, APPRECIATION, ENTERTAINMENT"
-        ):
-            validate_reaction(bad)
 
 
 def test_parse_mentions_offsets():

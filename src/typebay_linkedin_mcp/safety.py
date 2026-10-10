@@ -201,16 +201,6 @@ def validate_video(path: str | None) -> Video | None:
     return Video(path_, digest, size)
 
 
-REACTIONS = ("LIKE", "PRAISE", "EMPATHY", "INTEREST", "APPRECIATION", "ENTERTAINMENT")  # MAYBE is deprecated
-
-
-def validate_reaction(value: str) -> str:
-    value = (value or "").strip().upper()
-    if value not in REACTIONS:
-        raise ValidationError(f"reaction must be one of {', '.join(REACTIONS)}.")
-    return value
-
-
 _MENTION = re.compile(r"@\[([^\]]*)\]\((urn:li:[A-Za-z]+:[^)\s]*)\)")
 _MENTION_KEYS = {
     "organization": ("com.linkedin.common.CompanyAttributedEntity", "company"),

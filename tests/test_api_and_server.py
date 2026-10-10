@@ -507,43 +507,48 @@ def test_stale_comment_preview_refused(logged_in):
     assert not route.called
 
 
+LIKES = "https://api.linkedin.com/v2/socialActions/urn%3Ali%3Ashare%3A5/likes"
+
+
 @respx.mock
-def test_react_wire_format():
-    route = respx.post("https://api.linkedin.com/rest/reactions", params={"actor": AUTHOR}).respond(201)
-    _client_for_tests().react("urn:li:share:5", "PRAISE")
+def test_like_wire_format():
+    route = respx.post(LIKES).respond(201)
+    _client_for_tests().like("urn:li:share:5")
     req = route.calls.last.request
-    assert req.url.query == b"actor=urn%3Ali%3Aperson%3Aabc"
-    assert req.headers["Linkedin-Version"] == "202609"
+    assert req.method == "POST" and str(req.url) == LIKES
+    assert "Linkedin-Version" not in req.headers
     assert req.headers["X-Restli-Protocol-Version"] == "2.0.0"
     assert req.headers["Authorization"] == "Bearer SECRET-TOKEN"
-    assert json.loads(req.read()) == {"root": "urn:li:share:5", "reactionType": "PRAISE"}
+    assert json.loads(req.read()) == {"actor": AUTHOR, "object": "urn:li:share:5"}
 
 
 @respx.mock
-def test_unreact_wire_format():
-    route = respx.delete(url__regex=r".*/rest/reactions/.*").respond(204)
-    _client_for_tests().unreact("urn:li:share:5")
+def test_unlike_wire_format():
+    url = f"{LIKES}/urn%3Ali%3Aperson%3Aabc?actor=urn%3Ali%3Aperson%3Aabc"
+    route = respx.delete(url__regex=r".*/likes/.*").respond(204)
+    _client_for_tests().unlike("urn:li:share:5")
     req = route.calls.last.request
-    assert req.method == "DELETE"
-    assert str(req.url) == (
-        "https://api.linkedin.com/rest/reactions/(actor:urn%3Ali%3Aperson%3Aabc,entity:urn%3Ali%3Ashare%3A5)"
-    )
-    assert req.headers["Linkedin-Version"] == "202609"
+    assert req.method == "DELETE" and str(req.url) == url
+    assert "Linkedin-Version" not in req.headers
+    assert req.headers["Authorization"] == "Bearer SECRET-TOKEN"
 
 
 @respx.mock
-def test_react_tool_validates_and_notes_unknown_urn(logged_in):
-    route = respx.post("https://api.linkedin.com/rest/reactions").respond(201)
-    for bad in ("MAYBE", "nope"):
-        with pytest.raises(ValidationError, match="LIKE, PRAISE"):
-            server.linkedin_react_to_post("urn:li:share:5", bad)
-    assert not route.called
-    out = server.linkedin_react_to_post("urn:li:share:5", "praise")
-    assert out["reacted"] is True and out["reaction"] == "PRAISE" and "post log" in out["note"]
-    assert json.loads(route.calls.last.request.read())["reactionType"] == "PRAISE"
-    unr = respx.delete(url__regex=r".*/rest/reactions/.*").respond(204)
+def test_react_tool_likes_and_notes_unknown_urn(logged_in):
+    route = respx.post(LIKES).respond(201)
+    out = server.linkedin_react_to_post("urn:li:share:5")
+    assert out["reacted"] is True and out["reaction"] == "LIKE" and "post log" in out["note"]
+    assert json.loads(route.calls.last.request.read()) == {"actor": AUTHOR, "object": "urn:li:share:5"}
+    unr = respx.delete(url__regex=r".*/likes/.*").respond(204)
     out = server.linkedin_react_to_post("urn:li:share:5", remove=True)
     assert out["reacted"] is False and unr.call_count == 1
+
+
+@respx.mock
+def test_403_message_explains_scopes():
+    msg = _post_error(403, json={"message": "DO-NOT-SHOW"})
+    assert msg.startswith("LinkedIn denied the request (403). The token's scopes do not cover")
+    assert "connections-only" in msg and "Share on LinkedIn product" in msg and "DO-NOT-SHOW" not in msg
 
 
 @respx.mock

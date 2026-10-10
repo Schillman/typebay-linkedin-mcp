@@ -26,12 +26,6 @@ def logged_in(monkeypatch):
 UGC = "https://api.linkedin.com/v2/ugcPosts"
 
 
-@pytest.fixture(autouse=True)
-def state(monkeypatch, tmp_path):
-    monkeypatch.setenv("LINKEDIN_MCP_STATE_DIR", str(tmp_path))
-    return tmp_path
-
-
 def test_record_and_order():
     for n in "abc":
         postlog.record({"urn": n, "ts": 1})
@@ -46,6 +40,10 @@ def test_deleted_filtered():
     postlog.record({"deleted": "a", "ts": 3})
     assert [p["urn"] for p in postlog.posts()] == ["b"]
     assert postlog.known("b") and not postlog.known("a") and not postlog.known("z")
+
+
+def test_post_log_is_isolated(tmp_path):
+    assert postlog.path() == tmp_path / "posts.jsonl"
 
 
 def test_default_path_uses_xdg(monkeypatch, tmp_path):

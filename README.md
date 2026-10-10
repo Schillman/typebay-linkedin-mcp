@@ -150,8 +150,8 @@ Clients that list MCP prompts show these (Claude Code `/mcp` prompts, Claude Des
 - Share on LinkedIn allows 150 requests per member per day. A post with images costs one request per image plus two.
 - LinkedIn's API cannot create native Articles, only posts (text, images, link shares).
 - The `/rest/posts` Posts API belongs to the vetted Community Management API (registered organizations, commercial use). This server deliberately uses the self-serve UGC API instead.
-- The UGC Post API page on Microsoft Learn is labelled Legacy and says the Posts API replaces it. The listed sunset applies to Marketing partners only, so this is a risk to watch, not a current break.
-- Still unverified until a live test: multi image posts, comments, delete, and how `#hashtags` render. See `PLAN.md`.
+- The UGC Post API page on Microsoft Learn is labelled Legacy and says the Posts API replaces it. The listed sunset applies to Marketing partners only, so this is a risk to watch, not a current break. A 410 from LinkedIn is reported as a retirement notice.
+- Verified by a live test on 2026-10-10: multi image posts, first comment, delete, link share. Still unverified: how `#hashtags` render, and video. See `PLAN.md`.
 
 ## Development
 

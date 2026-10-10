@@ -43,6 +43,11 @@ def _explain(resp: httpx.Response) -> str:
         return "LinkedIn rate limit hit (150 requests per member per day). Try again later."
     if status == 403:
         return "LinkedIn denied the request. Check the app has the Share on LinkedIn product."
+    if status == 410:
+        return (
+            "LinkedIn retired this endpoint (the UGC Post API is labelled Legacy). "
+            "Check for a newer version of typebay-linkedin-mcp."
+        )
     return f"LinkedIn API error {status}: {msg}" if msg else f"LinkedIn API error {status}."
 
 

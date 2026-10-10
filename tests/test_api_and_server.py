@@ -120,6 +120,16 @@ def test_non_json_error_body_is_not_echoed():
 
 
 @respx.mock
+def test_410_is_retirement_notice_not_raw_body():
+    msg = _post_error(410, json={"message": "gone", "secretish": "DO-NOT-SHOW"})
+    assert msg == (
+        "LinkedIn retired this endpoint (the UGC Post API is labelled Legacy). "
+        "Check for a newer version of typebay-linkedin-mcp."
+    )
+    assert "DO-NOT-SHOW" not in msg and "gone" not in msg
+
+
+@respx.mock
 def test_422_duplicate_mapping():
     assert "duplicate" in _post_error(422, json={"message": "Duplicate post content"})
 

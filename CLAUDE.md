@@ -15,7 +15,7 @@ Python 3.12+, `uv` with `uv_build` backend. HTTP in tests is mocked with `respx`
 
 ## Architecture
 
-Local stdio MCP server (official `mcp` SDK, `MCPServer`) that posts to the user's own LinkedIn profile via the self-serve UGC Post API (`/v2/ugcPosts`, `/v2/assets`), not the vetted `/rest/posts` API. Bring-your-own LinkedIn app; nothing secret ships in the package. `PLAN.md` holds the design rationale and the list of behaviors still unverified by a live test (multi image, comments (possible `object` body field), delete scope, hashtags, SYNCHRONOUS_UPLOAD, video).
+Local stdio MCP server (official `mcp` SDK, `MCPServer`) that posts to the user's own LinkedIn profile via the self-serve UGC Post API (`/v2/ugcPosts`, `/v2/assets`), not the vetted `/rest/posts` API. Bring-your-own LinkedIn app; nothing secret ships in the package. `PLAN.md` holds the design rationale and the verified behaviors (live test 2026-10-10) and what is still unverified (hashtag rendering, video).
 
 Module flow, all under `src/typebay_linkedin_mcp/`:
 - `__init__.py`: CLI entry (`main`). Imports `auth`/`server` lazily per subcommand. `serve` runs `mcp.run("stdio")`. Configures logging to stderr, level from `LINKEDIN_MCP_LOG_LEVEL`.

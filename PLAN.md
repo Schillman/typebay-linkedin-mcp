@@ -11,17 +11,22 @@ Verified against Microsoft Learn (2026-10-10). Sources: SOL = learn.microsoft.co
 - Text limit is 3000 characters (UGC).
 - `DELETE /v2/ugcPosts/{urn}` is idempotent, a repeat returns 204 (UGC).
 - Reshare: same body as a text post plus `responseContext.parent` (UGC). Not built yet.
-- Link share: `shareMediaCategory:"ARTICLE"`, `media:[{status, originalUrl, title, description}]` (SOL, UGC). Not built yet.
+- Link share: `shareMediaCategory:"ARTICLE"`, `media:[{status, originalUrl, title, description}]` (SOL, UGC).
 - `/v2/ugcPosts` and `/v2/assets` need only `X-Restli-Protocol-Version: 2.0.0`, no `Linkedin-Version` (SOL). That header is for `/rest/*`.
 - `GET /v2/userinfo` returns `sub`, `name`, `given_name`, `family_name`, `picture`, `locale`, plus `email` and `email_verified` only with the `email` scope (OIDC).
 - `POST https://www.linkedin.com/oauth/v2/introspectToken`: form body `client_id`, `client_secret`, `token`; returns `active`, `status`, `scope`, `created_at`, `expires_at`, `authorized_at`, `auth_type` (INTRO).
 
-Unverified, settled by the live test:
-- Multiple images in one ugcPost. Docs describe MultiImage only on `/rest/posts`.
-- Comment endpoint. Docs show `/rest/socialActions/{urn}/comments` with an `object` body field and scope `w_member_social_feed`. The `/v2/socialActions/{urn}/comments` path we use is undocumented. Add `object` if it returns 400.
-- Hashtag rendering of plain `#tag` in ugcPosts (docs show it only for `/rest/posts`).
-- Whether `w_member_social` alone allows delete.
-- `SYNCHRONOUS_UPLOAD` on `/v2/assets` (docs show it on `/rest/assets`).
+Verified by the live test:
+- Multiple images in one ugcPost (`shareMediaCategory:"IMAGE"`, two media entries, each from registerUpload plus a PUT to the upload URL): 201 (live test 2026-10-10).
+- Comment: `POST /v2/socialActions/{urn}/comments` with `{"actor", "message": {"text"}}` and only `w_member_social`: 201, no `object` field needed (live test 2026-10-10).
+- Delete: `DELETE /v2/ugcPosts/{urn}` with `w_member_social`: 204. A repeat delete of the same URN: 204 again (live test 2026-10-10).
+- Link share (ARTICLE with originalUrl, title, description): 201 (live test 2026-10-10).
+- The URN in `x-restli-id` is `urn:li:share:<id>` (live test 2026-10-10).
+- Hashtags: a post with `#mcp #python #linkedinapi` was accepted, 201 (live test 2026-10-10).
+- `SYNCHRONOUS_UPLOAD` is not needed: plain registerUpload plus PUT works (live test 2026-10-10).
+
+Unverified:
+- Whether hashtags render as clickable tags (the test post was deleted before a visual check).
 - Video. The UGC error table says video creation is restricted to allowlisted apps. Do not build before a test upload.
 
 ## Architecture
@@ -50,6 +55,7 @@ Scopes: `openid profile w_member_social`. Nothing else.
 | `linkedin_preview_post` | read only | validates text (3000 chars) and images, returns exact preview plus a confirm token (hash of content) |
 | `linkedin_publish_post` | open world, not idempotent | publishes only if the confirm token matches the preview; returns post URN and URL |
 | `linkedin_add_comment` | open world | first comment (for a link, keeping it out of the post body) |
+| `linkedin_list_my_posts` | read only | lists posts this server published, from the local log |
 | `linkedin_delete_post` | destructive | deletes a post, needs confirm |
 
 The preview, then confirm gate is the key safety feature: Claude cannot publish text the user has not seen.
@@ -73,8 +79,8 @@ The preview, then confirm gate is the key safety feature: Claude cannot publish 
 5. Comment and delete.
 6. Tests: `respx` mocked HTTP. The harness must fail on a known bad case (publish without confirm, wrong token, oversized image) before it is trusted.
 7. Packaging: README, `.mcp.json` example, `claude mcp add` command with env references.
-8. Live test: publish a test post with restricted visibility, verify it in the UI, delete it.
-9. Real run: publish the agentic workflow post (text plus images), then the first comment.
+8. Live test (done): publish a test post with restricted visibility, verify it in the UI, delete it.
+9. Real run (done): publish the agentic workflow post (text plus images), then the first comment.
 
 ## Needs from the user
 

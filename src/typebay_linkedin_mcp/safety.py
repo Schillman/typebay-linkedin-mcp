@@ -201,18 +201,60 @@ def validate_video(path: str | None) -> Video | None:
     return Video(path_, digest, size)
 
 
+_MENTION = re.compile(r"@\[([^\]]*)\]\((urn:li:[A-Za-z]+:[^)\s]*)\)")
+_MENTION_KEYS = {
+    "organization": ("com.linkedin.common.CompanyAttributedEntity", "company"),
+    "person": ("com.linkedin.common.MemberAttributedEntity", "member"),
+}
+
+
+def parse_mentions(text: str) -> tuple[str, list[dict], list[dict]]:
+    """Replace @[Name](urn:li:organization:1) with Name. Returns plain text, UGC attributes, mentions."""
+    out, attrs, mentions, pos = [], [], [], 0
+    plain_len = 0
+    for m in _MENTION.finditer(text):
+        name, urn = m.group(1).strip(), m.group(2)
+        kind = urn.split(":")[2]
+        if kind not in _MENTION_KEYS or not urn.split(":", 3)[3]:
+            raise ValidationError("Mentions support urn:li:organization and urn:li:person only.")
+        if not name:
+            raise ValidationError("A mention needs a display name: @[Name](urn:li:organization:123).")
+        before = text[pos : m.start()]
+        out += [before, name]
+        plain_len += len(before)
+        entity, field = _MENTION_KEYS[kind]
+        # ponytail: offsets are code points. LinkedIn may count UTF-16 units
+        # when emoji precede a mention, upgrade path: encode to utf-16 and halve.
+        attrs.append({"start": plain_len, "length": len(name), "value": {entity: {field: urn}}})
+        mentions.append({"name": name, "urn": urn})
+        plain_len += len(name)
+        pos = m.end()
+    out.append(text[pos:])
+    return "".join(out), attrs, mentions
+
+
 def confirm_token(
-    text: str, images: list[Image], visibility: str, link: Link | None = None, video: Video | None = None
+    text: str,
+    images: list[Image],
+    visibility: str,
+    link: Link | None = None,
+    video: Video | None = None,
+    reshare_of: str | None = None,
 ) -> str:
     """Binds a publish call to exactly the content that was previewed."""
-    payload = json.dumps(
-        {
-            "t": text,
-            "i": [(im.sha256, im.alt) for im in images],
-            "v": visibility,
-            "l": asdict(link) if link else None,
-            "vid": video.sha256 if video else None,
-        },
-        sort_keys=True,
-    )
+    key = {
+        "t": text,
+        "i": [(im.sha256, im.alt) for im in images],
+        "v": visibility,
+        "l": asdict(link) if link else None,
+        "vid": video.sha256 if video else None,
+    }
+    if reshare_of:  # only added when set, so tokens for plain posts are unchanged
+        key["r"] = reshare_of
+    return hashlib.sha256(json.dumps(key, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def comment_token(post_urn: str, text: str) -> str:
+    """Binds add_comment to the previewed comment text and target post."""
+    payload = json.dumps({"comment_on": post_urn, "t": text}, sort_keys=True)
     return hashlib.sha256(payload.encode()).hexdigest()[:16]

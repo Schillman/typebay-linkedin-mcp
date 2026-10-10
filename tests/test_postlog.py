@@ -107,6 +107,13 @@ def test_delete_unknown_urn_note(logged_in):
 @respx.mock
 def test_comment_unknown_urn_note(logged_in):
     respx.post(url__regex=r".*socialActions.*").respond(201, json={})
-    assert "not in the local post log" in server.linkedin_add_comment("urn:li:share:9", "hi")["note"]
+    p = server.linkedin_preview_comment("urn:li:share:9", "hi")
+    assert "not in the local post log" in p["note"]
+    assert (
+        "not in the local post log"
+        in server.linkedin_add_comment("urn:li:share:9", "hi", p["confirm_token"])["note"]
+    )
     postlog.record({"urn": "urn:li:share:9", "ts": 1})
-    assert "note" not in server.linkedin_add_comment("urn:li:share:9", "hi")
+    p = server.linkedin_preview_comment("urn:li:share:9", "hi")
+    assert "note" not in p
+    assert "note" not in server.linkedin_add_comment("urn:li:share:9", "hi", p["confirm_token"])

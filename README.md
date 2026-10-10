@@ -7,7 +7,7 @@ Publish to your own LinkedIn profile from Claude, with a preview you approve bef
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-An MCP server for LinkedIn's official self-serve API (Share on LinkedIn, UGC Post API). Text, images, video, link shares, a first comment, delete. Bring your own LinkedIn app: nothing secret ships in this package, and credentials never enter a chat transcript.
+An MCP server for LinkedIn's official self-serve API (Share on LinkedIn, UGC Post API). Text, images, video, link shares, reshares, mentions, comments, likes, edit, delete. Bring your own LinkedIn app: nothing secret ships in this package, and credentials never enter a chat transcript.
 
 ## Quick start
 
@@ -30,7 +30,11 @@ Ask Claude to preview a post. You get the exact text, a `confirm_token`, and a f
 - **Image posts**: one or more PNG/JPEG/GIF files, with alt text per image.
 - **Video posts**: one MP4 file.
 - **Link posts**: a URL with a preview card, optional title and description.
-- **First comment** on your own post, for example to keep a link out of the body.
+- **Reshares**: `reshare_of` takes a post URN, exclusive with images, video and link.
+- **Mentions** of people and organizations in post text, see [Mentions and reshares](#mentions-and-reshares).
+- **Comments** on a post, for example a first comment to keep a link out of the body, with its own preview and token.
+- **Likes**: like a post or remove the like. LIKE is the only reaction type available to self-serve apps (other types need `w_member_social_feed`).
+- **Edit** the text of your own post, only with an explicit `confirm=true`.
 - **Delete** your own post, only with an explicit `confirm=true`.
 - **Status**: login state, token status and scope straight from LinkedIn, days until expiry, and a renew nudge.
 - **Post lint** in every preview: fold position, paragraph length, hashtag count, links in the body.
@@ -38,12 +42,14 @@ Ask Claude to preview a post. You get the exact text, a `confirm_token`, and a f
 - **Metadata stripping**: EXIF, XMP, IPTC and text metadata (including GPS) are removed from JPEG and PNG before upload.
 - **Prompt templates**: three prompts that draft a post and stop at the preview.
 - **`doctor`**: checks credentials, token, scopes and callback port, with a fix hint per failure.
-- **Read only mode** (`LINKEDIN_MCP_READ_ONLY=1`) leaves only status, preview and list_my_posts registered.
+- **Read only mode** (`LINKEDIN_MCP_READ_ONLY=1`) leaves only status, list_my_posts, preview_post and preview_comment registered.
 
 ## Safety model
 
-- **Preview, then publish.** The token proves *what* is published matches what was previewed. It is not human consent. **Human approval comes from your MCP client's permission prompt, so do not auto-allow `linkedin_publish_post`, `linkedin_add_comment` or `linkedin_delete_post`.**
-- Credentials are typed into a hidden CLI prompt and stored in the OS keychain. They are never tool arguments, never logged, never in error messages.
+- **Preview, then publish.** The token proves *what* is published matches what was previewed. It is not human consent. **Human approval comes from your MCP client's permission prompt, so do not auto-allow `linkedin_publish_post`, `linkedin_add_comment`, `linkedin_react_to_post`, `linkedin_edit_post` or `linkedin_delete_post`.**
+- Comments go through `linkedin_preview_comment` too: the token binds the post URN and the comment text, expires after 15 minutes and works once. Edit and delete refuse unless `confirm=true`.
+- If LinkedIn does not answer the final publish request (network error or timeout), the preview is discarded, an `unknown_outcome` record goes to the post log, and the error tells you to check your feed before previewing again, because the post may exist.
+- Credentials are typed into a hidden CLI prompt and stored in the OS keychain. They are never tool arguments, never logged, never in error messages. A keychain failure surfaces as a readable error with a fix hint.
 - Images must be PNG/JPEG/GIF (magic bytes checked), under 10 MB, and inside an allowed directory (default: the server's working directory; set `LINKEDIN_MCP_IMAGE_DIRS`). Symlinks are resolved before the check.
 - A video must be an MP4 (magic bytes checked), under 200 MB, and inside the same allowed directories.
 - EXIF, XMP, IPTC and text metadata (including GPS) are stripped from JPEG and PNG before upload; pixel data and colour profiles are untouched.
@@ -105,20 +111,29 @@ Same shape as Claude Desktop. A ready made copy is in `.mcp.json.example`.
 
 ## Tools
 
-The permission prompt of your MCP client is the consent gate for the three write tools, so do not auto-allow them.
+The permission prompt of your MCP client is the consent gate for the write tools (everything marked yes below), so do not auto-allow them.
 
 | Tool | What it does | Parameters (name: type, default) | Annotations | Needs human approval |
 |---|---|---|---|---|
 | `linkedin_status` | Reports login state and days left on the token. | none | read only, not open world | no |
-| `linkedin_preview_post` | Validates a post, returns the exact preview, a `confirm_token`, `above_fold` and advisory `warnings`. Does not publish. | `text: str` (required), `image_paths: list[str] \| null = null`, `alt_texts: list[str] \| null = null`, `visibility: str = "PUBLIC"`, `link_url: str \| null = null`, `link_title: str \| null = null`, `link_description: str \| null = null`, `video_path: str \| null = null` | read only, not open world | no |
-| `linkedin_publish_post` | Publishes a previewed post. Fails unless the content matches a preview under 15 minutes old. | `text: str` (required), `confirm_token: str` (required), `image_paths: list[str] \| null = null`, `alt_texts: list[str] \| null = null`, `visibility: str = "PUBLIC"`, `link_url: str \| null = null`, `link_title: str \| null = null`, `link_description: str \| null = null`, `video_path: str \| null = null` | not destructive, not idempotent, open world | yes |
 | `linkedin_list_my_posts` | Lists posts this server published (newest first, deleted excluded) from a local log. | `limit: int = 20` (clamped 1 to 100) | read only, not open world | no |
-| `linkedin_add_comment` | Adds a comment (for example a link) to one of your posts. | `post_urn: str` (required), `text: str` (required) | not destructive, not idempotent, open world | yes |
+| `linkedin_preview_post` | Validates a post, returns the exact preview, a `confirm_token`, `above_fold`, advisory `warnings` and, when present, `mentions`. Does not publish. | `text: str` (required), `image_paths: list[str] \| null = null`, `alt_texts: list[str] \| null = null`, `visibility: str = "PUBLIC"`, `link_url: str \| null = null`, `link_title: str \| null = null`, `link_description: str \| null = null`, `video_path: str \| null = null`, `reshare_of: str \| null = null` | read only, not open world | no |
+| `linkedin_publish_post` | Publishes a previewed post. Fails unless the content matches a preview under 15 minutes old. | `text: str` (required), `confirm_token: str` (required), `image_paths: list[str] \| null = null`, `alt_texts: list[str] \| null = null`, `visibility: str = "PUBLIC"`, `link_url: str \| null = null`, `link_title: str \| null = null`, `link_description: str \| null = null`, `video_path: str \| null = null`, `reshare_of: str \| null = null` | not destructive, not idempotent, open world | yes |
+| `linkedin_preview_comment` | Validates a comment and returns the exact preview plus a `confirm_token` bound to the post URN and text. Does not post. | `post_urn: str` (required), `text: str` (required) | read only, not open world | no |
+| `linkedin_add_comment` | Adds a comment (for example a link) to one of your posts. Needs the token from `linkedin_preview_comment`. | `post_urn: str` (required), `text: str` (required), `confirm_token: str` (required) | not destructive, not idempotent, open world | yes |
 | `linkedin_delete_post` | Permanently deletes one of your posts. Refuses unless `confirm=true`. | `post_urn: str` (required), `confirm: bool = false` | destructive, idempotent, open world | yes |
+| `linkedin_react_to_post` | Likes a post or removes the like. LIKE is the only reaction type available to self-serve apps (other types need `w_member_social_feed`). | `post_urn: str` (required), `remove: bool = false` | not destructive, idempotent, open world | yes |
+| `linkedin_edit_post` | Replaces the text of one of your posts. Refuses unless `confirm=true`. | `post_urn: str` (required), `text: str` (required), `confirm: bool = false` | destructive, idempotent, open world | yes |
 
 Every tool returns a typed result (`outputSchema`), so clients can rely on fields such as `confirm_token`, `urn` and `url`.
 
-A post can carry images, a video, or a link with a preview card, one of them. Title and description are optional, and LinkedIn does not scrape them from the URL.
+A post can carry images, a video, a link with a preview card, or be a reshare, one of them. Title and description are optional, and LinkedIn does not scrape them from the URL.
+
+### Mentions and reshares
+
+Write a mention in the post text as `@[Display Name](urn:li:organization:123)` or `@[Display Name](urn:li:person:ID)`. Only those two URN types are accepted. The preview shows the plain text plus a `mentions` list, the `confirm_token` binds the raw text, and LinkedIn receives the plain text with attributes. LinkedIn only renders the mention when the display name matches the entity's name: for a member any one of their names, for an organization the full name. There is no lookup API on these scopes, so you supply the URN. Your own person URN is in your token. Organization URNs are in the company page admin URL, or in the Organization Lookup API, which needs scopes this app does not have.
+
+`reshare_of` takes a `urn:li:share:`, `urn:li:ugcPost:` or `urn:li:activity:` URN and is sent as `responseContext.parent`. Resharing a PUBLIC post works (201); LinkedIn returns 403 when the parent is a CONNECTIONS only post. It is part of the confirm token and is logged as `reshare_of`.
 
 ## Prompts
 
@@ -140,11 +155,12 @@ Clients that list MCP prompts show these (Claude Code `/mcp` prompts, Claude Des
 
 | Variable | Effect |
 |---|---|
-| `LINKEDIN_MCP_READ_ONLY=1` | Registers only `linkedin_status`, `linkedin_preview_post` and `linkedin_list_my_posts`, plus the prompts. |
+| `LINKEDIN_MCP_READ_ONLY=1` | Registers only `linkedin_status`, `linkedin_list_my_posts`, `linkedin_preview_post` and `linkedin_preview_comment`, plus the prompts. |
 | `LINKEDIN_MCP_STATE_DIR` | Post log directory. Default `$XDG_STATE_HOME/typebay-linkedin-mcp`. |
 | `LINKEDIN_MCP_IMAGE_DIRS` | Allowed image directories, path separator delimited. Default: the working directory. |
 | `LINKEDIN_MCP_MAX_IMAGE_BYTES` | Image size cap. Default 10 MB. |
 | `LINKEDIN_MCP_MAX_VIDEO_BYTES` | Video size cap. Default 200 MB. |
+| `LINKEDIN_MCP_API_VERSION` | `Linkedin-Version` header for `/rest` endpoints (edit). Default `202609`. LinkedIn supports a version for one year, so bump it when LinkedIn sunsets it. |
 | `LINKEDIN_MCP_LOG_LEVEL` | Default `WARNING`. `DEBUG` logs raw LinkedIn error bodies to stderr. |
 | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | Override the keychain, for CI. |
 
@@ -152,9 +168,10 @@ Clients that list MCP prompts show these (Claude Code `/mcp` prompts, Claude Des
 
 - Share on LinkedIn allows 150 requests per member per day. A post with images costs one request per image plus two. A video post costs two plus one request per status poll.
 - LinkedIn's API cannot create native Articles, only posts (text, images, video, link shares).
-- The `/rest/posts` Posts API belongs to the vetted Community Management API (registered organizations, commercial use). This server deliberately uses the self-serve UGC API instead.
+- Posts are created through the self-serve UGC Post API (`/v2/ugcPosts`). The versioned Posts API (`/rest/posts`) is used only for edit, which works with `w_member_social`; its full feature set (documents, polls, organization posts) belongs to the vetted Community Management API.
 - The UGC Post API page on Microsoft Learn is labelled Legacy and says the Posts API replaces it. The listed sunset applies to Marketing partners only, so this is a risk to watch, not a current break. A 410 from LinkedIn is reported as a retirement notice.
-- Every claim in this README was verified by a live test on 2026-10-10 (multi image posts, video posts, first comment, delete, link share, hashtags rendering as tags). See `PLAN.md`.
+- Organization (company page) posting is not available to self-serve apps: it needs `w_organization_social`, which only the approval gated Community Management API product grants. Scopes stay `openid profile w_member_social`. Scheduling, analytics and reading other people's content are out of scope.
+- Every claim in this README was verified by a live test on 2026-10-10 (multi image posts, video posts, comments with the preview token, delete, link share, hashtags rendering as tags, mentions, reshare of a public post, likes, edit, and the edit and delete `confirm` gates). See `PLAN.md`.
 
 ## Development
 

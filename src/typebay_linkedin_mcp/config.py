@@ -17,6 +17,8 @@ MAX_IMAGE_BYTES = int(os.environ.get("LINKEDIN_MCP_MAX_IMAGE_BYTES", 10 * 1024 *
 MAX_VIDEO_BYTES = int(os.environ.get("LINKEDIN_MCP_MAX_VIDEO_BYTES", 200 * 1024 * 1024))
 VISIBILITIES = ("PUBLIC", "CONNECTIONS")  # the two values documented for Share on LinkedIn
 CONFIRM_TTL_SECONDS = 15 * 60
+# Linkedin-Version header for the versioned /rest endpoints; versions are supported for one year.
+LINKEDIN_VERSION = os.environ.get("LINKEDIN_MCP_API_VERSION", "202609")
 
 
 def allowed_image_dirs() -> list[str]:

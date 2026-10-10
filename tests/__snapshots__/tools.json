@@ -152,6 +152,10 @@
                 }
               ]
             },
+            "reshare_of": {
+              "title": "Reshare Of",
+              "type": "string"
+            },
             "text": {
               "title": "Text",
               "type": "string"
@@ -287,6 +291,18 @@
           "default": null,
           "title": "Link Url"
         },
+        "reshare_of": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reshare Of"
+        },
         "text": {
           "title": "Text",
           "type": "string"
@@ -379,6 +395,14 @@
         "link": {
           "$ref": "#/$defs/LinkInfo"
         },
+        "mentions": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Mentions",
+          "type": "array"
+        },
         "metadata_stripped": {
           "items": {
             "type": "string"
@@ -392,6 +416,10 @@
         },
         "preview": {
           "title": "Preview",
+          "type": "string"
+        },
+        "reshare_of": {
+          "title": "Reshare Of",
           "type": "string"
         },
         "video": {
@@ -503,6 +531,18 @@
           "default": null,
           "title": "Link Url"
         },
+        "reshare_of": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reshare Of"
+        },
         "text": {
           "title": "Text",
           "type": "string"
@@ -559,12 +599,11 @@
   },
   {
     "annotations": {
-      "destructiveHint": false,
-      "idempotentHint": false,
-      "openWorldHint": true,
-      "title": "Comment on LinkedIn post"
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Preview LinkedIn comment"
     },
-    "description": "Add a comment (for example a link) to one of the user's posts. Show the text to the user first.",
+    "description": "Validate a comment and return the exact preview plus a confirm_token. Does not post.",
     "inputSchema": {
       "properties": {
         "post_urn": {
@@ -579,6 +618,78 @@
       "required": [
         "post_urn",
         "text"
+      ],
+      "title": "linkedin_preview_commentArguments",
+      "type": "object"
+    },
+    "name": "linkedin_preview_comment",
+    "outputSchema": {
+      "properties": {
+        "characters": {
+          "title": "Characters",
+          "type": "integer"
+        },
+        "confirm_token": {
+          "title": "Confirm Token",
+          "type": "string"
+        },
+        "next": {
+          "title": "Next",
+          "type": "string"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "preview": {
+          "title": "Preview",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "preview",
+        "characters",
+        "confirm_token",
+        "next"
+      ],
+      "title": "CommentPreviewResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true,
+      "title": "Comment on LinkedIn post"
+    },
+    "description": "Add a comment (for example a link) to one of the user's posts. Show the text to the user first.",
+    "inputSchema": {
+      "properties": {
+        "confirm_token": {
+          "title": "Confirm Token",
+          "type": "string"
+        },
+        "post_urn": {
+          "title": "Post Urn",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "post_urn",
+        "text",
+        "confirm_token"
       ],
       "title": "linkedin_add_commentArguments",
       "type": "object"
@@ -650,6 +761,121 @@
         "urn"
       ],
       "title": "DeleteResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "title": "React to LinkedIn post"
+    },
+    "description": "Like a post or remove the like. LIKE is the only reaction type available to self-serve apps.",
+    "inputSchema": {
+      "properties": {
+        "post_urn": {
+          "title": "Post Urn",
+          "type": "string"
+        },
+        "remove": {
+          "default": false,
+          "title": "Remove",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "post_urn"
+      ],
+      "title": "linkedin_react_to_postArguments",
+      "type": "object"
+    },
+    "name": "linkedin_react_to_post",
+    "outputSchema": {
+      "properties": {
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "reacted": {
+          "title": "Reacted",
+          "type": "boolean"
+        },
+        "reaction": {
+          "title": "Reaction",
+          "type": "string"
+        },
+        "urn": {
+          "title": "Urn",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reacted",
+        "reaction",
+        "urn"
+      ],
+      "title": "ReactionResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "title": "Edit LinkedIn post text"
+    },
+    "description": "Replace the text of one of the user's posts. Show the user the new text, then pass confirm=true.",
+    "inputSchema": {
+      "properties": {
+        "confirm": {
+          "default": false,
+          "title": "Confirm",
+          "type": "boolean"
+        },
+        "post_urn": {
+          "title": "Post Urn",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "post_urn",
+        "text"
+      ],
+      "title": "linkedin_edit_postArguments",
+      "type": "object"
+    },
+    "name": "linkedin_edit_post",
+    "outputSchema": {
+      "properties": {
+        "edited": {
+          "title": "Edited",
+          "type": "boolean"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "urn": {
+          "title": "Urn",
+          "type": "string"
+        }
+      },
+      "required": [
+        "edited",
+        "urn",
+        "url"
+      ],
+      "title": "EditResult",
       "type": "object"
     }
   }

@@ -10,7 +10,7 @@ import urllib.parse
 import httpx
 from mcp.server.mcpserver.exceptions import ToolError
 
-from .config import API_BASE
+from .config import API_BASE, LINKEDIN_VERSION
 from .safety import Image, Link, Video, strip_metadata
 
 log = logging.getLogger(__name__)
@@ -22,6 +22,10 @@ POLL_DEADLINE = 120
 
 class LinkedInError(ToolError):
     """Raised with a message that is safe to show the user. Never contains tokens."""
+
+
+class LinkedInUnknownOutcome(LinkedInError):
+    """The request may have reached LinkedIn; the post may exist."""
 
 
 def error_message(resp: httpx.Response) -> str:
@@ -45,7 +49,11 @@ def _explain(resp: httpx.Response) -> str:
             return "LinkedIn is throttling comments (1 per minute). Wait a minute and retry."
         return "LinkedIn rate limit hit (150 requests per member per day). Try again later."
     if status == 403:
-        return "LinkedIn denied the request. Check the app has the Share on LinkedIn product."
+        return (
+            "LinkedIn denied the request (403). The token's scopes do not cover this action "
+            "(examples: resharing a connections-only post, posting as an organization), "
+            "or the app lacks the Share on LinkedIn product."
+        )
     if status == 410:
         return (
             "LinkedIn retired this endpoint (the UGC Post API is labelled Legacy). "
@@ -60,9 +68,20 @@ class LinkedInClient:
         self._http = http or httpx.Client(base_url=API_BASE, timeout=30)
         self._auth = {"Authorization": f"Bearer {access_token}"}
         self._headers = {**self._auth, "X-Restli-Protocol-Version": "2.0.0"}
+        self._rest_headers = {**self._headers, "Linkedin-Version": LINKEDIN_VERSION}
 
-    def _request(self, method: str, url: str, **kw) -> httpx.Response:
-        resp = self._http.request(method, url, headers=self._headers, **kw)
+    def _request(self, method: str, url: str, unknown_outcome: bool = False, **kw) -> httpx.Response:
+        try:
+            kw.setdefault("headers", self._headers)
+            resp = self._http.request(method, url, **kw)
+        except httpx.TransportError as e:
+            log.debug("Transport error on %s %s: %r", method, url, e)
+            if unknown_outcome:
+                raise LinkedInUnknownOutcome(
+                    "LinkedIn did not answer while publishing. The post may still have been published: "
+                    "check your feed before previewing again."
+                ) from None
+            raise LinkedInError("LinkedIn did not answer (network error or timeout). Try again.") from None
         if resp.status_code >= 400:
             raise LinkedInError(_explain(resp))
         return resp
@@ -86,9 +105,12 @@ class LinkedInClient:
         """Register, then upload. Returns the digitalmediaAsset URN."""
         value = self._register_upload("urn:li:digitalmediaRecipe:feedshare-image")
         upload_url = value["uploadMechanism"][_UPLOAD_KEY]["uploadUrl"]
-        put = self._http.put(
-            upload_url, content=strip_metadata(image.path.read_bytes(), image.mime), headers=self._auth
-        )
+        try:
+            put = self._http.put(
+                upload_url, content=strip_metadata(image.path.read_bytes(), image.mime), headers=self._auth
+            )
+        except httpx.TransportError:
+            raise LinkedInError("Image upload failed (network error or timeout). Try again.") from None
         if put.status_code >= 400:
             raise LinkedInError(f"Image upload failed ({put.status_code}).")
         return value["asset"]
@@ -97,8 +119,11 @@ class LinkedInClient:
         """Register, stream the file, then poll until the asset is AVAILABLE. Returns the asset URN."""
         value = self._register_upload("urn:li:digitalmediaRecipe:feedshare-video")
         upload_url = value["uploadMechanism"][_UPLOAD_KEY]["uploadUrl"]
-        with video.path.open("rb") as f:
-            put = self._http.put(upload_url, content=f, headers=self._auth)
+        try:
+            with video.path.open("rb") as f:
+                put = self._http.put(upload_url, content=f, headers=self._auth)
+        except httpx.TransportError:
+            raise LinkedInError("Video upload failed (network error or timeout). Try again.") from None
         if put.status_code >= 400:
             raise LinkedInError(f"Video upload failed ({put.status_code}).")
         asset = value["asset"]
@@ -124,9 +149,11 @@ class LinkedInClient:
         images: list[Image],
         link: Link | None = None,
         video: Video | None = None,
+        reshare_of: str | None = None,
+        attributes: list[dict] | None = None,
     ) -> str:
         content: dict = {
-            "shareCommentary": {"text": text},
+            "shareCommentary": {"text": text, **({"attributes": attributes} if attributes else {})},
             "shareMediaCategory": "IMAGE" if images else "NONE",
         }
         if images:
@@ -158,7 +185,9 @@ class LinkedInClient:
             "specificContent": {"com.linkedin.ugc.ShareContent": content},
             "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": visibility},
         }
-        return self._request("POST", "/v2/ugcPosts", json=body).headers["x-restli-id"]
+        if reshare_of:
+            body["responseContext"] = {"parent": reshare_of}
+        return self._request("POST", "/v2/ugcPosts", unknown_outcome=True, json=body).headers["x-restli-id"]
 
     def add_comment(self, post_urn: str, text: str) -> None:
         quoted = urllib.parse.quote(post_urn, safe="")
@@ -166,6 +195,24 @@ class LinkedInClient:
             "POST",
             f"/v2/socialActions/{quoted}/comments",
             json={"actor": self.author, "message": {"text": text}},
+        )
+
+    def like(self, post_urn: str) -> None:
+        quoted = urllib.parse.quote(post_urn, safe="")
+        self._request(
+            "POST", f"/v2/socialActions/{quoted}/likes", json={"actor": self.author, "object": post_urn}
+        )
+
+    def unlike(self, post_urn: str) -> None:
+        quoted, actor = (urllib.parse.quote(u, safe="") for u in (post_urn, self.author))
+        self._request("DELETE", f"/v2/socialActions/{quoted}/likes/{actor}?actor={actor}")
+
+    def edit_post(self, post_urn: str, text: str) -> None:
+        self._request(
+            "POST",
+            f"/rest/posts/{urllib.parse.quote(post_urn, safe='')}",
+            headers={**self._rest_headers, "X-RestLi-Method": "PARTIAL_UPDATE"},
+            json={"patch": {"$set": {"commentary": text}}},
         )
 
     def delete_post(self, post_urn: str) -> None:

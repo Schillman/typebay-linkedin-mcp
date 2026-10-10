@@ -4,17 +4,20 @@ Wire format per Microsoft Learn: linkedin/consumer/integrations/self-serve/share
 """
 
 import logging
+import time
 import urllib.parse
 
 import httpx
 from mcp.server.mcpserver.exceptions import ToolError
 
 from .config import API_BASE
-from .safety import Image, Link, strip_metadata
+from .safety import Image, Link, Video, strip_metadata
 
 log = logging.getLogger(__name__)
 
 _UPLOAD_KEY = "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"
+POLL_INTERVAL = 5
+POLL_DEADLINE = 120
 
 
 class LinkedInError(ToolError):
@@ -64,14 +67,13 @@ class LinkedInClient:
             raise LinkedInError(_explain(resp))
         return resp
 
-    def upload_image(self, image: Image) -> str:
-        """Register, then upload. Returns the digitalmediaAsset URN."""
-        value = self._request(
+    def _register_upload(self, recipe: str) -> dict:
+        return self._request(
             "POST",
             "/v2/assets?action=registerUpload",
             json={
                 "registerUploadRequest": {
-                    "recipes": ["urn:li:digitalmediaRecipe:feedshare-image"],
+                    "recipes": [recipe],
                     "owner": self.author,
                     "serviceRelationships": [
                         {"relationshipType": "OWNER", "identifier": "urn:li:userGeneratedContent"}
@@ -79,6 +81,10 @@ class LinkedInClient:
                 }
             },
         ).json()["value"]
+
+    def upload_image(self, image: Image) -> str:
+        """Register, then upload. Returns the digitalmediaAsset URN."""
+        value = self._register_upload("urn:li:digitalmediaRecipe:feedshare-image")
         upload_url = value["uploadMechanism"][_UPLOAD_KEY]["uploadUrl"]
         put = self._http.put(
             upload_url, content=strip_metadata(image.path.read_bytes(), image.mime), headers=self._auth
@@ -87,7 +93,38 @@ class LinkedInClient:
             raise LinkedInError(f"Image upload failed ({put.status_code}).")
         return value["asset"]
 
-    def create_post(self, text: str, visibility: str, images: list[Image], link: Link | None = None) -> str:
+    def upload_video(self, video: Video) -> str:
+        """Register, stream the file, then poll until the asset is AVAILABLE. Returns the asset URN."""
+        value = self._register_upload("urn:li:digitalmediaRecipe:feedshare-video")
+        upload_url = value["uploadMechanism"][_UPLOAD_KEY]["uploadUrl"]
+        with video.path.open("rb") as f:
+            put = self._http.put(upload_url, content=f, headers=self._auth)
+        if put.status_code >= 400:
+            raise LinkedInError(f"Video upload failed ({put.status_code}).")
+        asset = value["asset"]
+        waited = 0
+        while True:  # polling the GET is idempotent, unlike the post
+            recipes = self._request("GET", f"/v2/assets/{asset.rsplit(':', 1)[-1]}").json().get("recipes", [])
+            statuses = [r.get("status") for r in recipes]
+            if {"CLIENT_ERROR", "SERVER_ERROR"} & set(statuses):
+                raise LinkedInError("LinkedIn could not process the video. Check it is a valid MP4.")
+            if statuses and all(s == "AVAILABLE" for s in statuses):
+                return asset
+            if waited >= POLL_DEADLINE:
+                raise LinkedInError(
+                    f"LinkedIn is still processing the video after {POLL_DEADLINE} seconds. Try again later."
+                )
+            time.sleep(POLL_INTERVAL)
+            waited += POLL_INTERVAL
+
+    def create_post(
+        self,
+        text: str,
+        visibility: str,
+        images: list[Image],
+        link: Link | None = None,
+        video: Video | None = None,
+    ) -> str:
         content: dict = {
             "shareCommentary": {"text": text},
             "shareMediaCategory": "IMAGE" if images else "NONE",
@@ -101,6 +138,11 @@ class LinkedInClient:
                     "title": {"text": im.alt or im.path.stem},
                 }
                 for im in images
+            ]
+        if video:
+            content["shareMediaCategory"] = "VIDEO"
+            content["media"] = [
+                {"status": "READY", "media": self.upload_video(video), "title": {"text": video.path.stem}}
             ]
         if link:
             content["shareMediaCategory"] = "ARTICLE"

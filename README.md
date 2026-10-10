@@ -7,7 +7,7 @@ Publish to your own LinkedIn profile from Claude, with a preview you approve bef
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-An MCP server for LinkedIn's official self-serve API (Share on LinkedIn, UGC Post API). Text, images, link shares, a first comment, delete. Bring your own LinkedIn app: nothing secret ships in this package, and credentials never enter a chat transcript.
+An MCP server for LinkedIn's official self-serve API (Share on LinkedIn, UGC Post API). Text, images, video, link shares, a first comment, delete. Bring your own LinkedIn app: nothing secret ships in this package, and credentials never enter a chat transcript.
 
 ## Quick start
 
@@ -28,6 +28,7 @@ Ask Claude to preview a post. You get the exact text, a `confirm_token`, and a f
 
 - **Text posts** up to 3000 characters, visibility `PUBLIC` or `CONNECTIONS`.
 - **Image posts**: one or more PNG/JPEG/GIF files, with alt text per image.
+- **Video posts**: one MP4 file.
 - **Link posts**: a URL with a preview card, optional title and description.
 - **First comment** on your own post, for example to keep a link out of the body.
 - **Delete** your own post, only with an explicit `confirm=true`.
@@ -44,6 +45,7 @@ Ask Claude to preview a post. You get the exact text, a `confirm_token`, and a f
 - **Preview, then publish.** The token proves *what* is published matches what was previewed. It is not human consent. **Human approval comes from your MCP client's permission prompt, so do not auto-allow `linkedin_publish_post`, `linkedin_add_comment` or `linkedin_delete_post`.**
 - Credentials are typed into a hidden CLI prompt and stored in the OS keychain. They are never tool arguments, never logged, never in error messages.
 - Images must be PNG/JPEG/GIF (magic bytes checked), under 10 MB, and inside an allowed directory (default: the server's working directory; set `LINKEDIN_MCP_IMAGE_DIRS`). Symlinks are resolved before the check.
+- A video must be an MP4 (magic bytes checked), under 200 MB, and inside the same allowed directories.
 - EXIF, XMP, IPTC and text metadata (including GPS) are stripped from JPEG and PNG before upload; pixel data and colour profiles are untouched.
 - Minimal scopes: `openid profile w_member_social`. Personal profile only. Visibility is `PUBLIC` or `CONNECTIONS`.
 - Never retries a publish. 401 and 429 give a plain message. The post log holds text and URNs only.
@@ -108,15 +110,15 @@ The permission prompt of your MCP client is the consent gate for the three write
 | Tool | What it does | Parameters (name: type, default) | Annotations | Needs human approval |
 |---|---|---|---|---|
 | `linkedin_status` | Reports login state and days left on the token. | none | read only, not open world | no |
-| `linkedin_preview_post` | Validates a post, returns the exact preview, a `confirm_token`, `above_fold` and advisory `warnings`. Does not publish. | `text: str` (required), `image_paths: list[str] \| null = null`, `alt_texts: list[str] \| null = null`, `visibility: str = "PUBLIC"`, `link_url: str \| null = null`, `link_title: str \| null = null`, `link_description: str \| null = null` | read only, not open world | no |
-| `linkedin_publish_post` | Publishes a previewed post. Fails unless the content matches a preview under 15 minutes old. | `text: str` (required), `confirm_token: str` (required), `image_paths: list[str] \| null = null`, `alt_texts: list[str] \| null = null`, `visibility: str = "PUBLIC"`, `link_url: str \| null = null`, `link_title: str \| null = null`, `link_description: str \| null = null` | not destructive, not idempotent, open world | yes |
+| `linkedin_preview_post` | Validates a post, returns the exact preview, a `confirm_token`, `above_fold` and advisory `warnings`. Does not publish. | `text: str` (required), `image_paths: list[str] \| null = null`, `alt_texts: list[str] \| null = null`, `visibility: str = "PUBLIC"`, `link_url: str \| null = null`, `link_title: str \| null = null`, `link_description: str \| null = null`, `video_path: str \| null = null` | read only, not open world | no |
+| `linkedin_publish_post` | Publishes a previewed post. Fails unless the content matches a preview under 15 minutes old. | `text: str` (required), `confirm_token: str` (required), `image_paths: list[str] \| null = null`, `alt_texts: list[str] \| null = null`, `visibility: str = "PUBLIC"`, `link_url: str \| null = null`, `link_title: str \| null = null`, `link_description: str \| null = null`, `video_path: str \| null = null` | not destructive, not idempotent, open world | yes |
 | `linkedin_list_my_posts` | Lists posts this server published (newest first, deleted excluded) from a local log. | `limit: int = 20` (clamped 1 to 100) | read only, not open world | no |
 | `linkedin_add_comment` | Adds a comment (for example a link) to one of your posts. | `post_urn: str` (required), `text: str` (required) | not destructive, not idempotent, open world | yes |
 | `linkedin_delete_post` | Permanently deletes one of your posts. Refuses unless `confirm=true`. | `post_urn: str` (required), `confirm: bool = false` | destructive, idempotent, open world | yes |
 
 Every tool returns a typed result (`outputSchema`), so clients can rely on fields such as `confirm_token`, `urn` and `url`.
 
-A post can carry images or a link with a preview card, not both. Title and description are optional, and LinkedIn does not scrape them from the URL.
+A post can carry images, a video, or a link with a preview card, one of them. Title and description are optional, and LinkedIn does not scrape them from the URL.
 
 ## Prompts
 
@@ -142,16 +144,17 @@ Clients that list MCP prompts show these (Claude Code `/mcp` prompts, Claude Des
 | `LINKEDIN_MCP_STATE_DIR` | Post log directory. Default `$XDG_STATE_HOME/typebay-linkedin-mcp`. |
 | `LINKEDIN_MCP_IMAGE_DIRS` | Allowed image directories, path separator delimited. Default: the working directory. |
 | `LINKEDIN_MCP_MAX_IMAGE_BYTES` | Image size cap. Default 10 MB. |
+| `LINKEDIN_MCP_MAX_VIDEO_BYTES` | Video size cap. Default 200 MB. |
 | `LINKEDIN_MCP_LOG_LEVEL` | Default `WARNING`. `DEBUG` logs raw LinkedIn error bodies to stderr. |
 | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | Override the keychain, for CI. |
 
 ## Limits
 
-- Share on LinkedIn allows 150 requests per member per day. A post with images costs one request per image plus two.
-- LinkedIn's API cannot create native Articles, only posts (text, images, link shares).
+- Share on LinkedIn allows 150 requests per member per day. A post with images costs one request per image plus two. A video post costs two plus one request per status poll.
+- LinkedIn's API cannot create native Articles, only posts (text, images, video, link shares).
 - The `/rest/posts` Posts API belongs to the vetted Community Management API (registered organizations, commercial use). This server deliberately uses the self-serve UGC API instead.
 - The UGC Post API page on Microsoft Learn is labelled Legacy and says the Posts API replaces it. The listed sunset applies to Marketing partners only, so this is a risk to watch, not a current break. A 410 from LinkedIn is reported as a retirement notice.
-- Every claim in this README was verified by a live test on 2026-10-10 (multi image posts, first comment, delete, link share, hashtags rendering as tags). Video upload also works on a self-serve app but is not built yet. See `PLAN.md`.
+- Every claim in this README was verified by a live test on 2026-10-10 (multi image posts, video posts, first comment, delete, link share, hashtags rendering as tags). See `PLAN.md`.
 
 ## Development
 

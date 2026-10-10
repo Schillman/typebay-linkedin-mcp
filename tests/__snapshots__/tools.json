@@ -168,6 +168,17 @@
               "title": "Urn",
               "type": "string"
             },
+            "video": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Video"
+            },
             "visibility": {
               "title": "Visibility",
               "type": "string"
@@ -280,6 +291,18 @@
           "title": "Text",
           "type": "string"
         },
+        "video_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Video Path"
+        },
         "visibility": {
           "default": "PUBLIC",
           "title": "Visibility",
@@ -369,6 +392,10 @@
         },
         "preview": {
           "title": "Preview",
+          "type": "string"
+        },
+        "video": {
+          "title": "Video",
           "type": "string"
         },
         "visibility": {
@@ -479,6 +506,18 @@
         "text": {
           "title": "Text",
           "type": "string"
+        },
+        "video_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Video Path"
         },
         "visibility": {
           "default": "PUBLIC",

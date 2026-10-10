@@ -20,21 +20,21 @@ Local stdio MCP server (official `mcp` SDK, `MCPServer`) that posts to the user'
 Module flow, all under `src/typebay_linkedin_mcp/`:
 - `__init__.py`: CLI entry (`main`). Imports `auth`/`server` lazily per subcommand. `serve` runs `mcp.run("stdio")`. Configures logging to stderr, level from `LINKEDIN_MCP_LOG_LEVEL`.
 - `server.py`: six tools and three prompts (`announcement`, `lessons_learned`, `link_with_first_comment`; prompts stay registered in read-only mode). Tools are plain functions (tests call them directly) returning TypedDict results, which the SDK publishes as `outputSchema`. Shared `_validate` for preview and publish. `linkedin_status` calls `auth.introspect` when client creds are in the keychain, else falls back to the stored expiry (`source` field says which). Holds the in-memory `_previews` dict (confirm_token to issue time).
-- `safety.py`: pure validation (text length, visibility, image allowlist/magic bytes/size, links via `Link` and `validate_link`) and `confirm_token`, plus `lint_text` (advisory preview warnings) and `strip_metadata` (JPEG/PNG EXIF, XMP, IPTC, text chunks).
+- `safety.py`: pure validation (text length, visibility, image allowlist/magic bytes/size, `Video` and `validate_video` for MP4 magic bytes and size cap, links via `Link` and `validate_link`) and `confirm_token`, plus `lint_text` (advisory preview warnings) and `strip_metadata` (JPEG/PNG EXIF, XMP, IPTC, text chunks).
 - `postlog.py`: local JSONL post log (under `LINKEDIN_MCP_STATE_DIR`) written on publish and delete; backs `linkedin_list_my_posts` and the known URN check.
 - `doctor.py`: the `doctor` subcommand, checks creds, token, scopes and callback port with fix hints.
-- `api.py`: `LinkedInClient`, a thin httpx wrapper. `_explain` maps 401, 403, 422 duplicate and 429 (throttle vs daily cap) to user safe messages and never echoes the raw body (logged at debug only).
+- `api.py`: `LinkedInClient`, a thin httpx wrapper; `upload_video` polls the asset status until AVAILABLE before the post. `_explain` maps 401, 403, 422 duplicate and 429 (throttle vs daily cap) to user safe messages and never echoes the raw body (logged at debug only).
 - `auth.py`: OAuth authorization code flow for the `login` CLI (localhost callback, `state` check, code exchange, member lookup).
 - `store.py`: OS keychain via `keyring`. `LINKEDIN_CLIENT_ID`/`LINKEDIN_CLIENT_SECRET` env vars override stored client creds.
-- `config.py`: constants and env overrides (`LINKEDIN_MCP_IMAGE_DIRS`, `LINKEDIN_MCP_MAX_IMAGE_BYTES`).
+- `config.py`: constants and env overrides (`LINKEDIN_MCP_IMAGE_DIRS`, `LINKEDIN_MCP_MAX_IMAGE_BYTES`, `LINKEDIN_MCP_MAX_VIDEO_BYTES`).
 
 ## Invariants to preserve
 
-- **Preview then publish gate.** `linkedin_publish_post` recomputes the token from text, image content hashes, alt texts, link fields and visibility, and requires a matching preview under 15 minutes old. Each preview publishes once (popped only after a successful publish). The token proves content equality, not consent: human approval comes from the MCP client's permission prompt, so publish/comment/delete must not be auto-allowed.
+- **Preview then publish gate.** `linkedin_publish_post` recomputes the token from text, image content hashes, the video content hash, alt texts, link fields and visibility, and requires a matching preview under 15 minutes old. Each preview publishes once (popped only after a successful publish). The token proves content equality, not consent: human approval comes from the MCP client's permission prompt, so publish/comment/delete must not be auto-allowed.
 - **stdout is protocol only.** Log to stderr. The `status` subcommand is the only thing that prints to stdout, and it is not run under `serve`.
 - **No secrets anywhere.** Credentials are never tool arguments, never logged, never in error messages. `LinkedInError` and `ValidationError` messages must be safe to show the user. Both must subclass the SDK's `ToolError`: the SDK replaces any other exception's text with "Error executing tool X", losing the message (a test covers it).
 - **Never retry a publish.** Retries are only acceptable for idempotent calls.
-- **Image safety.** Paths are resolved (symlinks followed) before the allowlist check; type is decided by magic bytes, not extension. Images and a link are mutually exclusive.
+- **Image and video safety.** Paths are resolved (symlinks followed) before the allowlist check; type is decided by magic bytes, not extension. Images, a video and a link are mutually exclusive.
 - **Metadata is stripped before upload; the token binds the original file hash, not the stripped bytes.**
 - **The post log holds text and URNs only, never tokens.** A logging failure must not fail a publish (`_log_record` swallows `OSError`).
 - **Tool names and schemas are a contract.** Renames break clients' `mcp__linkedin__<name>` permission rules. Schema changes must regenerate the snapshot.

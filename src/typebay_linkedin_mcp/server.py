@@ -19,6 +19,7 @@ from .safety import (
     validate_images,
     validate_link,
     validate_text,
+    validate_video,
     validate_visibility,
 )
 from .safety import confirm_token as make_confirm_token
@@ -56,6 +57,7 @@ class PostRecord(TypedDict):
     text: NotRequired[str]
     visibility: NotRequired[str]
     images: NotRequired[list[str]]
+    video: NotRequired[str | None]
     link: NotRequired[LinkInfo | None]
     ts: NotRequired[int]
 
@@ -74,6 +76,7 @@ class PreviewResult(TypedDict):
     confirm_token: str
     next: str
     link: NotRequired[LinkInfo]
+    video: NotRequired[str]
     metadata_stripped: NotRequired[list[str]]
     warnings: NotRequired[list[str]]
 
@@ -166,15 +169,16 @@ def linkedin_list_my_posts(limit: int = 20) -> ListResult:
     return {"posts": postlog.posts(max(1, min(limit, 100))), "source": str(postlog.path())}
 
 
-def _validate(text, image_paths, alt_texts, visibility, link_url, link_title, link_description):
+def _validate(text, image_paths, alt_texts, visibility, link_url, link_title, link_description, video_path):
     """Shared by preview and publish so both hash exactly the same validated content."""
     text = validate_text(text)
     visibility = validate_visibility(visibility)
     images = validate_images(image_paths or [], alt_texts)
     link = validate_link(link_url, link_title, link_description)
-    if images and link:
-        raise ValidationError("A post can have images or a link, not both.")
-    return text, visibility, images, link
+    video = validate_video(video_path)
+    if sum(map(bool, (images, video, link))) > 1:
+        raise ValidationError("A post can have images, a video or a link, only one of them.")
+    return text, visibility, images, link, video
 
 
 @mcp.tool(
@@ -188,12 +192,13 @@ def linkedin_preview_post(
     link_url: str | None = None,
     link_title: str | None = None,
     link_description: str | None = None,
+    video_path: str | None = None,
 ) -> PreviewResult:
     """Validate a post and return the exact preview plus a confirm_token. Does not publish."""
-    text, visibility, images, link = _validate(
-        text, image_paths, alt_texts, visibility, link_url, link_title, link_description
+    text, visibility, images, link, video = _validate(
+        text, image_paths, alt_texts, visibility, link_url, link_title, link_description, video_path
     )
-    token = make_confirm_token(text, images, visibility, link)
+    token = make_confirm_token(text, images, visibility, link, video)
     _previews[token] = time.time()
     out: PreviewResult = {
         "preview": text,
@@ -206,6 +211,8 @@ def linkedin_preview_post(
     }
     if link:
         out["link"] = {"url": link.url, "title": link.title, "description": link.description}
+    if video:
+        out["video"] = str(video.path)
     if stripped := [str(i.path) for i in images if i.stripped]:
         out["metadata_stripped"] = stripped
     if warnings := lint_text(text):
@@ -227,16 +234,17 @@ def linkedin_publish_post(
     link_url: str | None = None,
     link_title: str | None = None,
     link_description: str | None = None,
+    video_path: str | None = None,
 ) -> PublishResult:
     """Publish a previewed post. Fails unless content matches a recent preview exactly."""
-    text, visibility, images, link = _validate(
-        text, image_paths, alt_texts, visibility, link_url, link_title, link_description
+    text, visibility, images, link, video = _validate(
+        text, image_paths, alt_texts, visibility, link_url, link_title, link_description, video_path
     )
-    expected = make_confirm_token(text, images, visibility, link)
+    expected = make_confirm_token(text, images, visibility, link, video)
     issued = _previews.get(expected)
     if confirm_token != expected or issued is None or time.time() - issued > CONFIRM_TTL_SECONDS:
         raise ValidationError("Content does not match a recent preview. Call linkedin_preview_post again.")
-    urn = _client().create_post(text, visibility, images, link)
+    urn = _client().create_post(text, visibility, images, link, video)
     _previews.pop(expected, None)  # one publish per preview
     _log_record(
         {
@@ -245,6 +253,7 @@ def linkedin_publish_post(
             "text": text,
             "visibility": visibility,
             "images": [str(i.path) for i in images],
+            "video": str(video.path) if video else None,
             "link": {"url": link.url, "title": link.title, "description": link.description} if link else None,
             "ts": int(time.time()),
         }

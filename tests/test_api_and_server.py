@@ -6,12 +6,13 @@ import httpx
 import pytest
 import respx
 
-from typebay_linkedin_mcp import server, store
+from typebay_linkedin_mcp import api, server, store
 from typebay_linkedin_mcp.api import LinkedInClient, LinkedInError
-from typebay_linkedin_mcp.safety import Link, ValidationError, validate_images
+from typebay_linkedin_mcp.safety import Link, ValidationError, validate_images, validate_video
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 AUTHOR = "urn:li:person:abc"
+MP4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 24
 
 
 @pytest.fixture
@@ -19,6 +20,14 @@ def img(tmp_path, monkeypatch):
     monkeypatch.setenv("LINKEDIN_MCP_IMAGE_DIRS", str(tmp_path))
     f = tmp_path / "a.png"
     f.write_bytes(PNG)
+    return str(f)
+
+
+@pytest.fixture
+def mp4(tmp_path, monkeypatch):
+    monkeypatch.setenv("LINKEDIN_MCP_IMAGE_DIRS", str(tmp_path))
+    f = tmp_path / "clip.mp4"
+    f.write_bytes(MP4)
     return str(f)
 
 
@@ -232,9 +241,9 @@ def test_link_validation(logged_in, img):
         server.linkedin_preview_post("hi", link_url="https://")
     with pytest.raises(ValidationError, match="link_url"):
         server.linkedin_preview_post("hi", link_title="T")
-    with pytest.raises(ValidationError, match="images or a link"):
+    with pytest.raises(ValidationError, match="only one of them"):
         server.linkedin_preview_post("hi", image_paths=[img], link_url="https://example.com")
-    with pytest.raises(ValidationError, match="images or a link"):
+    with pytest.raises(ValidationError, match="only one of them"):
         server.linkedin_publish_post("hi", "x", image_paths=[img], link_url="https://example.com")
 
 
@@ -330,3 +339,87 @@ def test_preview_metadata_stripped_reported(logged_in, tmp_path, monkeypatch):
 
 def test_preview_clean_png_has_no_metadata_stripped(logged_in, img):
     assert "metadata_stripped" not in server.linkedin_preview_post("hi", image_paths=[img])
+
+
+def _video_routes(statuses):
+    reg = respx.post("https://api.linkedin.com/v2/assets?action=registerUpload").respond(
+        200,
+        json={
+            "value": {
+                "uploadMechanism": {
+                    "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest": {
+                        "uploadUrl": "https://upload.example/v"
+                    }
+                },
+                "asset": "urn:li:digitalmediaAsset:V1",
+            }
+        },
+    )
+    put = respx.put("https://upload.example/v").respond(201)
+    status = respx.get("https://api.linkedin.com/v2/assets/V1").mock(
+        side_effect=[httpx.Response(200, json={"recipes": [{"status": s}]}) for s in statuses]
+    )
+    post = respx.post("https://api.linkedin.com/v2/ugcPosts").respond(
+        201, headers={"x-restli-id": "urn:li:ugcPost:7"}
+    )
+    return reg, put, status, post
+
+
+@respx.mock
+def test_video_post_wire_format(mp4, monkeypatch):
+    monkeypatch.setattr(api.time, "sleep", lambda s: None)
+    reg, put, status, post = _video_routes(["NEW", "AVAILABLE"])
+    urn = LinkedInClient(
+        "SECRET-TOKEN", AUTHOR, httpx.Client(base_url="https://api.linkedin.com")
+    ).create_post("hi", "PUBLIC", [], video=validate_video(mp4))
+    assert urn == "urn:li:ugcPost:7"
+    assert (
+        "feedshare-video" in json.loads(reg.calls.last.request.read())["registerUploadRequest"]["recipes"][0]
+    )
+    assert put.calls.last.request.headers["Authorization"] == "Bearer SECRET-TOKEN"
+    assert status.call_count == 2
+    content = json.loads(post.calls.last.request.read())["specificContent"]["com.linkedin.ugc.ShareContent"]
+    assert content["shareMediaCategory"] == "VIDEO"
+    assert content["media"] == [
+        {"status": "READY", "media": "urn:li:digitalmediaAsset:V1", "title": {"text": "clip"}}
+    ]
+
+
+@respx.mock
+def test_video_processing_error_never_posts(mp4, monkeypatch):
+    monkeypatch.setattr(api.time, "sleep", lambda s: None)
+    _, _, _, post = _video_routes(["CLIENT_ERROR"])
+    client = LinkedInClient("SECRET-TOKEN", AUTHOR, httpx.Client(base_url="https://api.linkedin.com"))
+    with pytest.raises(LinkedInError, match="could not process") as e:
+        client.create_post("hi", "PUBLIC", [], video=validate_video(mp4))
+    assert "SECRET-TOKEN" not in str(e.value)
+    assert not post.called
+
+
+@respx.mock
+def test_video_poll_deadline_never_posts(mp4, monkeypatch):
+    monkeypatch.setattr(api.time, "sleep", lambda s: None)
+    monkeypatch.setattr(api, "POLL_DEADLINE", 0)
+    _, _, _, post = _video_routes(["NEW", "NEW"])
+    client = LinkedInClient("SECRET-TOKEN", AUTHOR, httpx.Client(base_url="https://api.linkedin.com"))
+    with pytest.raises(LinkedInError, match="still processing"):
+        client.create_post("hi", "PUBLIC", [], video=validate_video(mp4))
+    assert not post.called
+
+
+def test_video_exclusive_with_images_and_link(logged_in, img, mp4):
+    with pytest.raises(ValidationError, match="only one of them"):
+        server.linkedin_preview_post("hi", image_paths=[img], video_path=mp4)
+    with pytest.raises(ValidationError, match="only one of them"):
+        server.linkedin_preview_post("hi", link_url="https://example.com", video_path=mp4)
+
+
+@respx.mock
+def test_preview_reports_video_and_publish_logs_it(logged_in, mp4, monkeypatch):
+    monkeypatch.setattr(api.time, "sleep", lambda s: None)
+    _video_routes(["AVAILABLE"])
+    p = server.linkedin_preview_post("hi", video_path=mp4)
+    assert p["video"].endswith("clip.mp4") and "video" not in server.linkedin_preview_post("hi")
+    out = server.linkedin_publish_post("hi", p["confirm_token"], video_path=mp4)
+    assert out["urn"] == "urn:li:ugcPost:7"
+    assert server.linkedin_list_my_posts()["posts"][0]["video"] == p["video"]

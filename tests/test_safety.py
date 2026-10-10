@@ -1,14 +1,19 @@
+import hashlib
+
 import pytest
 
+from typebay_linkedin_mcp import safety
 from typebay_linkedin_mcp.safety import (
     ValidationError,
     confirm_token,
     lint_text,
     validate_images,
     validate_text,
+    validate_video,
 )
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+MP4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 24
 
 
 def test_text_limits():
@@ -76,3 +81,43 @@ def test_lint_url():
     assert lint_text("see https://example.com") == [
         "URL in the body; consider link_url (preview card) or the first comment."
     ]
+
+
+@pytest.fixture
+def mp4(tmp_path, monkeypatch):
+    monkeypatch.setenv("LINKEDIN_MCP_IMAGE_DIRS", str(tmp_path))
+    f = tmp_path / "v.mp4"
+    f.write_bytes(MP4)
+    return f
+
+
+def test_video_ok_and_blank_is_none(mp4):
+    v = validate_video(str(mp4))
+    assert v.sha256 == hashlib.sha256(MP4).hexdigest() and v.size == len(MP4)
+    assert validate_video(None) is None and validate_video("  ") is None
+
+
+def test_video_type_is_magic_bytes_not_extension(tmp_path, monkeypatch):
+    monkeypatch.setenv("LINKEDIN_MCP_IMAGE_DIRS", str(tmp_path))
+    f = tmp_path / "x.mp4"
+    f.write_bytes(PNG)
+    with pytest.raises(ValidationError, match="not an MP4"):
+        validate_video(str(f))
+
+
+def test_video_allowlist_and_size(mp4, tmp_path, monkeypatch):
+    monkeypatch.setenv("LINKEDIN_MCP_IMAGE_DIRS", str(tmp_path / "other"))
+    with pytest.raises(ValidationError, match="outside the allowed"):
+        validate_video(str(mp4))
+    monkeypatch.setenv("LINKEDIN_MCP_IMAGE_DIRS", str(tmp_path))
+    monkeypatch.setattr(safety, "MAX_VIDEO_BYTES", 10)
+    with pytest.raises(ValidationError, match="limit is 10"):
+        validate_video(str(mp4))
+
+
+def test_token_binds_video(mp4):
+    t0 = confirm_token("hi", [], "PUBLIC")
+    t1 = confirm_token("hi", [], "PUBLIC", video=validate_video(str(mp4)))
+    assert t0 != t1
+    mp4.write_bytes(MP4 + b"1")
+    assert t1 != confirm_token("hi", [], "PUBLIC", video=validate_video(str(mp4)))

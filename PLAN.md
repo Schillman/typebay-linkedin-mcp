@@ -24,7 +24,7 @@ Verified by the live test:
 - The URN in `x-restli-id` is `urn:li:share:<id>` (live test 2026-10-10).
 - Hashtags render as clickable tags: a PUBLIC post with `#mcp #python #linkedinapi` was published (201), and its public post page (LinkedIn serves PUBLIC posts to guests at the `post_url`) showed each hashtag as an anchor to `/feed/hashtag/<tag>`. A CONNECTIONS post redirects guests to signup, so the check needs a PUBLIC post (live test 2026-10-10).
 - `SYNCHRONOUS_UPLOAD` is not needed: plain registerUpload plus PUT works (live test 2026-10-10).
-- Video works on this self-serve app, the UGC error table's "restricted to allowlisted apps" note did not apply. `POST /v2/assets?action=registerUpload` with recipe `urn:li:digitalmediaRecipe:feedshare-video` (same owner and serviceRelationships as images) returned 200 with an upload URL under `com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest`. A PUT of a 4.9 KB mp4 returned 201. `GET /v2/assets/{id}` reported the recipe status `NEW`, then `AVAILABLE` about 5 seconds later. `POST /v2/ugcPosts` with `shareMediaCategory:"VIDEO"` and `media:[{status:"READY", media:<asset urn>, title:{text}}]` returned 201. The URN in `x-restli-id` for a video post is `urn:li:ugcPost:<id>`, not `urn:li:share:<id>`. `DELETE /v2/ugcPosts/{urn}` on that ugcPost URN returned 204. Verified but not built into this server yet (live test 2026-10-10).
+- Video works on this self-serve app, the UGC error table's "restricted to allowlisted apps" note did not apply. `POST /v2/assets?action=registerUpload` with recipe `urn:li:digitalmediaRecipe:feedshare-video` (same owner and serviceRelationships as images) returned 200 with an upload URL under `com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest`. A PUT of a 4.9 KB mp4 returned 201. `GET /v2/assets/{id}` reported the recipe status `NEW`, then `AVAILABLE` about 5 seconds later. `POST /v2/ugcPosts` with `shareMediaCategory:"VIDEO"` and `media:[{status:"READY", media:<asset urn>, title:{text}}]` returned 201. The URN in `x-restli-id` for a video post is `urn:li:ugcPost:<id>`, not `urn:li:share:<id>`. `DELETE /v2/ugcPosts/{urn}` on that ugcPost URN returned 204. Built as `video_path` on preview and publish, with the asset status polled until AVAILABLE, and live tested through the server: publish in about 7 seconds, the `post_url` of the ugcPost URN renders the native video player for guests, delete 204 (live test 2026-10-10).
 
 Unverified: nothing. Every claim above has a Microsoft Learn source or a live test behind it (2026-10-10).
 
@@ -51,8 +51,8 @@ Scopes: `openid profile w_member_social`. Nothing else.
 | Tool | Annotations | Purpose |
 |---|---|---|
 | `linkedin_status` | read only | auth state, member name, days until token expiry |
-| `linkedin_preview_post` | read only | validates text (3000 chars) and images, returns exact preview plus a confirm token (hash of content) |
-| `linkedin_publish_post` | open world, not idempotent | publishes only if the confirm token matches the preview; returns post URN and URL |
+| `linkedin_preview_post` | read only | validates text (3000 chars), images and video, returns exact preview plus a confirm token (hash of content) |
+| `linkedin_publish_post` | open world, not idempotent | publishes (images or video) only if the confirm token matches the preview; returns post URN and URL |
 | `linkedin_add_comment` | open world | first comment (for a link, keeping it out of the post body) |
 | `linkedin_list_my_posts` | read only | lists posts this server published, from the local log |
 | `linkedin_delete_post` | destructive | deletes a post, needs confirm |

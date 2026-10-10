@@ -10,7 +10,7 @@ from pathlib import Path
 
 from mcp.server.mcpserver.exceptions import ToolError
 
-from .config import MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT, VISIBILITIES, allowed_image_dirs
+from .config import MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT, MAX_VIDEO_BYTES, VISIBILITIES, allowed_image_dirs
 
 FOLD_DESKTOP = 210
 FOLD_MOBILE = 140
@@ -37,6 +37,13 @@ class Image:
     size: int
     alt: str
     stripped: bool = False  # derived (metadata found); deliberately not in confirm_token
+
+
+@dataclass(frozen=True)
+class Video:
+    path: Path
+    sha256: str
+    size: int
 
 
 @dataclass(frozen=True)
@@ -146,25 +153,30 @@ def _inside(path: Path, roots: list[str]) -> bool:
     return any(path.is_relative_to(Path(r).resolve()) for r in roots)
 
 
+def _checked_file(raw: str, max_bytes: int) -> tuple[Path, int]:
+    """Shared by images and video: resolve symlinks, then allowlist, is_file and size cap."""
+    path = Path(raw).expanduser().resolve()  # resolves symlinks before the check
+    if not _inside(path, allowed_image_dirs()):
+        raise ValidationError(
+            f"{raw} is outside the allowed image directories. Set LINKEDIN_MCP_IMAGE_DIRS to allow it."
+        )
+    if not path.is_file():
+        raise ValidationError(f"{raw} is not a file.")
+    size = path.stat().st_size
+    if size > max_bytes:
+        raise ValidationError(f"{raw} is {size} bytes, limit is {max_bytes}.")
+    return path, size
+
+
 def validate_images(paths: list[str], alt_texts: list[str] | None = None) -> list[Image]:
     if len(paths) > MAX_IMAGES:
         raise ValidationError(f"At most {MAX_IMAGES} images are allowed.")
     alts = list(alt_texts or [])
     if alts and len(alts) != len(paths):
         raise ValidationError("alt_texts must have one entry per image.")
-    roots = allowed_image_dirs()
     images = []
     for i, raw in enumerate(paths):
-        path = Path(raw).expanduser().resolve()  # resolves symlinks before the check
-        if not _inside(path, roots):
-            raise ValidationError(
-                f"{raw} is outside the allowed image directories. Set LINKEDIN_MCP_IMAGE_DIRS to allow it."
-            )
-        if not path.is_file():
-            raise ValidationError(f"{raw} is not a file.")
-        size = path.stat().st_size
-        if size > MAX_IMAGE_BYTES:
-            raise ValidationError(f"{raw} is {size} bytes, limit is {MAX_IMAGE_BYTES}.")
+        path, size = _checked_file(raw, MAX_IMAGE_BYTES)
         data = path.read_bytes()
         mime = next((m for sig, m in _MAGIC.items() if data.startswith(sig)), None)
         if mime is None:
@@ -176,7 +188,22 @@ def validate_images(paths: list[str], alt_texts: list[str] | None = None) -> lis
     return images
 
 
-def confirm_token(text: str, images: list[Image], visibility: str, link: Link | None = None) -> str:
+def validate_video(path: str | None) -> Video | None:
+    raw = (path or "").strip()
+    if not raw:
+        return None
+    path_, size = _checked_file(raw, MAX_VIDEO_BYTES)
+    with path_.open("rb") as f:
+        if f.read(8)[4:8] != b"ftyp":  # ISO base media file (MP4), by magic bytes not extension
+            raise ValidationError(f"{raw} is not an MP4 video.")
+        f.seek(0)
+        digest = hashlib.file_digest(f, "sha256").hexdigest()  # streams, no full read into memory
+    return Video(path_, digest, size)
+
+
+def confirm_token(
+    text: str, images: list[Image], visibility: str, link: Link | None = None, video: Video | None = None
+) -> str:
     """Binds a publish call to exactly the content that was previewed."""
     payload = json.dumps(
         {
@@ -184,6 +211,7 @@ def confirm_token(text: str, images: list[Image], visibility: str, link: Link | 
             "i": [(im.sha256, im.alt) for im in images],
             "v": visibility,
             "l": asdict(link) if link else None,
+            "vid": video.sha256 if video else None,
         },
         sort_keys=True,
     )

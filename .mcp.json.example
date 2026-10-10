@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "linkedin": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/Schillman/typebay-linkedin-mcp", "typebay-linkedin-mcp"],
+      "env": { "LINKEDIN_MCP_IMAGE_DIRS": "/path/to/your/post/images" }
+    }
+  }
+}

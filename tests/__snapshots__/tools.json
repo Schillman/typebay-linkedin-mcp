@@ -1,0 +1,617 @@
+[
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Check LinkedIn login"
+    },
+    "description": "Report whether the user is logged in to LinkedIn and how many days the token has left.",
+    "inputSchema": {
+      "properties": {},
+      "title": "linkedin_statusArguments",
+      "type": "object"
+    },
+    "name": "linkedin_status",
+    "outputSchema": {
+      "properties": {
+        "days_left": {
+          "title": "Days Left",
+          "type": "integer"
+        },
+        "fix": {
+          "title": "Fix",
+          "type": "string"
+        },
+        "logged_in": {
+          "title": "Logged In",
+          "type": "boolean"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Name"
+        },
+        "renew": {
+          "title": "Renew",
+          "type": "string"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Scope"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Status"
+        }
+      },
+      "required": [
+        "logged_in"
+      ],
+      "title": "StatusResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "List posts published by this server"
+    },
+    "description": "List posts this server published (newest first, deleted ones excluded), from a local log.",
+    "inputSchema": {
+      "properties": {
+        "limit": {
+          "default": 20,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "title": "linkedin_list_my_postsArguments",
+      "type": "object"
+    },
+    "name": "linkedin_list_my_posts",
+    "outputSchema": {
+      "$defs": {
+        "LinkInfo": {
+          "properties": {
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Description"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Title"
+            },
+            "url": {
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          "required": [
+            "url",
+            "title",
+            "description"
+          ],
+          "title": "LinkInfo",
+          "type": "object"
+        },
+        "PostRecord": {
+          "properties": {
+            "images": {
+              "items": {
+                "type": "string"
+              },
+              "title": "Images",
+              "type": "array"
+            },
+            "link": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LinkInfo"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "text": {
+              "title": "Text",
+              "type": "string"
+            },
+            "ts": {
+              "title": "Ts",
+              "type": "integer"
+            },
+            "url": {
+              "title": "Url",
+              "type": "string"
+            },
+            "urn": {
+              "title": "Urn",
+              "type": "string"
+            },
+            "visibility": {
+              "title": "Visibility",
+              "type": "string"
+            }
+          },
+          "required": [
+            "urn"
+          ],
+          "title": "PostRecord",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "posts": {
+          "items": {
+            "$ref": "#/$defs/PostRecord"
+          },
+          "title": "Posts",
+          "type": "array"
+        },
+        "source": {
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "posts",
+        "source"
+      ],
+      "title": "ListResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "openWorldHint": false,
+      "readOnlyHint": true,
+      "title": "Preview LinkedIn post"
+    },
+    "description": "Validate a post and return the exact preview plus a confirm_token. Does not publish.",
+    "inputSchema": {
+      "properties": {
+        "alt_texts": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alt Texts"
+        },
+        "image_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Paths"
+        },
+        "link_description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Link Description"
+        },
+        "link_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Link Title"
+        },
+        "link_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Link Url"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "visibility": {
+          "default": "PUBLIC",
+          "title": "Visibility",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "linkedin_preview_postArguments",
+      "type": "object"
+    },
+    "name": "linkedin_preview_post",
+    "outputSchema": {
+      "$defs": {
+        "LinkInfo": {
+          "properties": {
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Description"
+            },
+            "title": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Title"
+            },
+            "url": {
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          "required": [
+            "url",
+            "title",
+            "description"
+          ],
+          "title": "LinkInfo",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "above_fold": {
+          "title": "Above Fold",
+          "type": "string"
+        },
+        "characters": {
+          "title": "Characters",
+          "type": "integer"
+        },
+        "confirm_token": {
+          "title": "Confirm Token",
+          "type": "string"
+        },
+        "images": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Images",
+          "type": "array"
+        },
+        "link": {
+          "$ref": "#/$defs/LinkInfo"
+        },
+        "metadata_stripped": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Metadata Stripped",
+          "type": "array"
+        },
+        "next": {
+          "title": "Next",
+          "type": "string"
+        },
+        "preview": {
+          "title": "Preview",
+          "type": "string"
+        },
+        "visibility": {
+          "title": "Visibility",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "preview",
+        "characters",
+        "above_fold",
+        "visibility",
+        "images",
+        "confirm_token",
+        "next"
+      ],
+      "title": "PreviewResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true,
+      "title": "Publish LinkedIn post"
+    },
+    "description": "Publish a previewed post. Fails unless content matches a recent preview exactly.",
+    "inputSchema": {
+      "properties": {
+        "alt_texts": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alt Texts"
+        },
+        "confirm_token": {
+          "title": "Confirm Token",
+          "type": "string"
+        },
+        "image_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Paths"
+        },
+        "link_description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Link Description"
+        },
+        "link_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Link Title"
+        },
+        "link_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Link Url"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "visibility": {
+          "default": "PUBLIC",
+          "title": "Visibility",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "confirm_token"
+      ],
+      "title": "linkedin_publish_postArguments",
+      "type": "object"
+    },
+    "name": "linkedin_publish_post",
+    "outputSchema": {
+      "properties": {
+        "published": {
+          "title": "Published",
+          "type": "boolean"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "urn": {
+          "title": "Urn",
+          "type": "string"
+        }
+      },
+      "required": [
+        "published",
+        "urn",
+        "url"
+      ],
+      "title": "PublishResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true,
+      "title": "Comment on LinkedIn post"
+    },
+    "description": "Add a comment (for example a link) to one of the user's posts. Show the text to the user first.",
+    "inputSchema": {
+      "properties": {
+        "post_urn": {
+          "title": "Post Urn",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "post_urn",
+        "text"
+      ],
+      "title": "linkedin_add_commentArguments",
+      "type": "object"
+    },
+    "name": "linkedin_add_comment",
+    "outputSchema": {
+      "properties": {
+        "commented": {
+          "title": "Commented",
+          "type": "boolean"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "commented",
+        "url"
+      ],
+      "title": "CommentResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": true,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "title": "Delete LinkedIn post"
+    },
+    "description": "Permanently delete one of the user's posts. Ask the user first, then call again with confirm=true.",
+    "inputSchema": {
+      "properties": {
+        "confirm": {
+          "default": false,
+          "title": "Confirm",
+          "type": "boolean"
+        },
+        "post_urn": {
+          "title": "Post Urn",
+          "type": "string"
+        }
+      },
+      "required": [
+        "post_urn"
+      ],
+      "title": "linkedin_delete_postArguments",
+      "type": "object"
+    },
+    "name": "linkedin_delete_post",
+    "outputSchema": {
+      "properties": {
+        "deleted": {
+          "title": "Deleted",
+          "type": "boolean"
+        },
+        "urn": {
+          "title": "Urn",
+          "type": "string"
+        }
+      },
+      "required": [
+        "deleted",
+        "urn"
+      ],
+      "title": "DeleteResult",
+      "type": "object"
+    }
+  }
+]

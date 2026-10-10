@@ -1,0 +1,45 @@
+[project]
+name = "typebay-linkedin-mcp"
+version = "0.1.0"
+description = "MCP server that publishes posts to your own LinkedIn profile via the official API. Bring your own LinkedIn app."
+readme = "README.md"
+authors = [
+    { name = "Sebastian Schillman", email = "mail+github@schillman.se" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "httpx>=0.28.1",
+    "keyring>=25.7.0",
+    "mcp>=2,<3",
+]
+
+[project.urls]
+Homepage = "https://github.com/Schillman/typebay-linkedin-mcp"
+Repository = "https://github.com/Schillman/typebay-linkedin-mcp"
+Issues = "https://github.com/Schillman/typebay-linkedin-mcp/issues"
+
+[project.scripts]
+typebay-linkedin-mcp = "typebay_linkedin_mcp:main"
+
+[build-system]
+requires = ["uv_build>=0.12.5,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "respx>=0.23.1",
+    "ruff>=0.17.0",
+]
+
+[tool.ruff]
+line-length = 110
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

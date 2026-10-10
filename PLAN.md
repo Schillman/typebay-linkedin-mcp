@@ -22,12 +22,11 @@ Verified by the live test:
 - Delete: `DELETE /v2/ugcPosts/{urn}` with `w_member_social`: 204. A repeat delete of the same URN: 204 again (live test 2026-10-10).
 - Link share (ARTICLE with originalUrl, title, description): 201 (live test 2026-10-10).
 - The URN in `x-restli-id` is `urn:li:share:<id>` (live test 2026-10-10).
-- Hashtags: a post with `#mcp #python #linkedinapi` was accepted, 201 (live test 2026-10-10).
+- Hashtags render as clickable tags: a PUBLIC post with `#mcp #python #linkedinapi` was published (201), and its public post page (LinkedIn serves PUBLIC posts to guests at the `post_url`) showed each hashtag as an anchor to `/feed/hashtag/<tag>`. A CONNECTIONS post redirects guests to signup, so the check needs a PUBLIC post (live test 2026-10-10).
 - `SYNCHRONOUS_UPLOAD` is not needed: plain registerUpload plus PUT works (live test 2026-10-10).
+- Video works on this self-serve app, the UGC error table's "restricted to allowlisted apps" note did not apply. `POST /v2/assets?action=registerUpload` with recipe `urn:li:digitalmediaRecipe:feedshare-video` (same owner and serviceRelationships as images) returned 200 with an upload URL under `com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest`. A PUT of a 4.9 KB mp4 returned 201. `GET /v2/assets/{id}` reported the recipe status `NEW`, then `AVAILABLE` about 5 seconds later. `POST /v2/ugcPosts` with `shareMediaCategory:"VIDEO"` and `media:[{status:"READY", media:<asset urn>, title:{text}}]` returned 201. The URN in `x-restli-id` for a video post is `urn:li:ugcPost:<id>`, not `urn:li:share:<id>`. `DELETE /v2/ugcPosts/{urn}` on that ugcPost URN returned 204. Verified but not built into this server yet (live test 2026-10-10).
 
-Unverified:
-- Whether hashtags render as clickable tags (the test post was deleted before a visual check).
-- Video. The UGC error table says video creation is restricted to allowlisted apps. Do not build before a test upload.
+Unverified: nothing. Every claim above has a Microsoft Learn source or a live test behind it (2026-10-10).
 
 ## Architecture
 

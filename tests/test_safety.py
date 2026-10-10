@@ -5,9 +5,12 @@ import pytest
 from typebay_linkedin_mcp import safety
 from typebay_linkedin_mcp.safety import (
     ValidationError,
+    comment_token,
     confirm_token,
     lint_text,
+    parse_mentions,
     validate_images,
+    validate_reaction,
     validate_text,
     validate_video,
 )
@@ -121,3 +124,58 @@ def test_token_binds_video(mp4):
     assert t0 != t1
     mp4.write_bytes(MP4 + b"1")
     assert t1 != confirm_token("hi", [], "PUBLIC", video=validate_video(str(mp4)))
+
+
+def test_comment_token_binds_post_and_text():
+    t = comment_token("urn:li:share:1", "hi")
+    assert t == comment_token("urn:li:share:1", "hi") and len(t) == 16
+    assert t != comment_token("urn:li:share:2", "hi") and t != comment_token("urn:li:share:1", "hi!")
+
+
+def test_plain_token_pinned_and_reshare_changes_it():
+    assert (
+        confirm_token("hi", [], "PUBLIC")
+        == hashlib.sha256(b'{"i": [], "l": null, "t": "hi", "v": "PUBLIC", "vid": null}').hexdigest()[:16]
+    )
+    assert confirm_token("hi", [], "PUBLIC", reshare_of="urn:li:share:1") != confirm_token("hi", [], "PUBLIC")
+
+
+def test_validate_reaction():
+    assert validate_reaction("like") == "LIKE"
+    for bad in ("MAYBE", "", "LOVE"):
+        with pytest.raises(
+            ValidationError, match="LIKE, PRAISE, EMPATHY, INTEREST, APPRECIATION, ENTERTAINMENT"
+        ):
+            validate_reaction(bad)
+
+
+def test_parse_mentions_offsets():
+    text, attrs, mentions = parse_mentions(
+        "Hi @[Acme](urn:li:organization:1) and @[Bo Li](urn:li:person:Ab9) bye"
+    )
+    assert text == "Hi Acme and Bo Li bye"
+    assert attrs == [
+        {
+            "start": 3,
+            "length": 4,
+            "value": {"com.linkedin.common.CompanyAttributedEntity": {"company": "urn:li:organization:1"}},
+        },
+        {
+            "start": 12,
+            "length": 5,
+            "value": {"com.linkedin.common.MemberAttributedEntity": {"member": "urn:li:person:Ab9"}},
+        },
+    ]
+    assert mentions == [
+        {"name": "Acme", "urn": "urn:li:organization:1"},
+        {"name": "Bo Li", "urn": "urn:li:person:Ab9"},
+    ]
+    assert text[3:7] == "Acme" and text[12:17] == "Bo Li"
+
+
+def test_parse_mentions_no_mentions_and_errors():
+    assert parse_mentions("plain @x [y](z)") == ("plain @x [y](z)", [], [])
+    with pytest.raises(ValidationError, match="organization and urn:li:person only"):
+        parse_mentions("@[X](urn:li:share:1)")
+    with pytest.raises(ValidationError, match="display name"):
+        parse_mentions("@[](urn:li:person:1)")

@@ -29,13 +29,14 @@ def test_tools_snapshot():
 
 def _call_add_comment_logged_out(monkeypatch):
     monkeypatch.setattr(store, "load_token", lambda: None)
+    token = server.linkedin_preview_comment("urn:li:share:1", "hi")["confirm_token"]
 
     async def go():
         # MCPServer.call_tool raises; the isError result is built by the protocol handler,
         # so go through an in-memory client.
         async with Client(server.mcp) as client:
             return await client.call_tool(
-                "linkedin_add_comment", {"post_urn": "urn:li:share:1", "text": "hi"}
+                "linkedin_add_comment", {"post_urn": "urn:li:share:1", "text": "hi", "confirm_token": token}
             )
 
     return asyncio.run(go())

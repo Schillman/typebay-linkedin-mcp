@@ -10,7 +10,7 @@ import urllib.parse
 import httpx
 from mcp.server.mcpserver.exceptions import ToolError
 
-from .config import API_BASE
+from .config import API_BASE, LINKEDIN_VERSION
 from .safety import Image, Link, Video, strip_metadata
 
 log = logging.getLogger(__name__)
@@ -64,10 +64,12 @@ class LinkedInClient:
         self._http = http or httpx.Client(base_url=API_BASE, timeout=30)
         self._auth = {"Authorization": f"Bearer {access_token}"}
         self._headers = {**self._auth, "X-Restli-Protocol-Version": "2.0.0"}
+        self._rest_headers = {**self._headers, "Linkedin-Version": LINKEDIN_VERSION}
 
     def _request(self, method: str, url: str, unknown_outcome: bool = False, **kw) -> httpx.Response:
         try:
-            resp = self._http.request(method, url, headers=self._headers, **kw)
+            kw.setdefault("headers", self._headers)
+            resp = self._http.request(method, url, **kw)
         except httpx.TransportError as e:
             log.debug("Transport error on %s %s: %r", method, url, e)
             if unknown_outcome:
@@ -143,9 +145,11 @@ class LinkedInClient:
         images: list[Image],
         link: Link | None = None,
         video: Video | None = None,
+        reshare_of: str | None = None,
+        attributes: list[dict] | None = None,
     ) -> str:
         content: dict = {
-            "shareCommentary": {"text": text},
+            "shareCommentary": {"text": text, **({"attributes": attributes} if attributes else {})},
             "shareMediaCategory": "IMAGE" if images else "NONE",
         }
         if images:
@@ -177,6 +181,8 @@ class LinkedInClient:
             "specificContent": {"com.linkedin.ugc.ShareContent": content},
             "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": visibility},
         }
+        if reshare_of:
+            body["responseContext"] = {"parent": reshare_of}
         return self._request("POST", "/v2/ugcPosts", unknown_outcome=True, json=body).headers["x-restli-id"]
 
     def add_comment(self, post_urn: str, text: str) -> None:
@@ -185,6 +191,29 @@ class LinkedInClient:
             "POST",
             f"/v2/socialActions/{quoted}/comments",
             json={"actor": self.author, "message": {"text": text}},
+        )
+
+    def react(self, post_urn: str, reaction_type: str) -> None:
+        actor = urllib.parse.quote(self.author, safe="")
+        self._request(
+            "POST",
+            f"/rest/reactions?actor={actor}",
+            headers=self._rest_headers,
+            json={"root": post_urn, "reactionType": reaction_type},
+        )
+
+    def unreact(self, post_urn: str) -> None:
+        actor, entity = (urllib.parse.quote(u, safe="") for u in (self.author, post_urn))
+        self._request(
+            "DELETE", f"/rest/reactions/(actor:{actor},entity:{entity})", headers=self._rest_headers
+        )
+
+    def edit_post(self, post_urn: str, text: str) -> None:
+        self._request(
+            "POST",
+            f"/rest/posts/{urllib.parse.quote(post_urn, safe='')}",
+            headers={**self._rest_headers, "X-RestLi-Method": "PARTIAL_UPDATE"},
+            json={"patch": {"$set": {"commentary": text}}},
         )
 
     def delete_post(self, post_urn: str) -> None:

@@ -8,7 +8,13 @@ import respx
 
 from typebay_linkedin_mcp import api, server, store
 from typebay_linkedin_mcp.api import LinkedInClient, LinkedInError, LinkedInUnknownOutcome
-from typebay_linkedin_mcp.safety import Link, ValidationError, validate_images, validate_video
+from typebay_linkedin_mcp.safety import (
+    Link,
+    ValidationError,
+    confirm_token,
+    validate_images,
+    validate_video,
+)
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
 AUTHOR = "urn:li:person:abc"
@@ -194,7 +200,12 @@ def test_read_only_mode_hides_write_tools(monkeypatch):
     try:
         ro = importlib.reload(server)
         names = {t.name for t in asyncio.run(ro.mcp.list_tools())}
-        assert names == {"linkedin_status", "linkedin_preview_post", "linkedin_list_my_posts"}
+        assert names == {
+            "linkedin_status",
+            "linkedin_preview_post",
+            "linkedin_list_my_posts",
+            "linkedin_preview_comment",
+        }
     finally:
         monkeypatch.delenv("LINKEDIN_MCP_READ_ONLY")
         importlib.reload(server)
@@ -458,3 +469,182 @@ def test_preview_prunes_expired_tokens(logged_in):
     server._previews["stale"] = time.time() - server.CONFIRM_TTL_SECONDS - 1
     p = server.linkedin_preview_post("hello")
     assert "stale" not in server._previews and p["confirm_token"] in server._previews
+
+
+def _client_for_tests():
+    return LinkedInClient("SECRET-TOKEN", AUTHOR, httpx.Client(base_url="https://api.linkedin.com"))
+
+
+SOCIAL = "https://api.linkedin.com/v2/socialActions/urn%3Ali%3Ashare%3A5/comments"
+
+
+@respx.mock
+def test_comment_needs_preview_and_token_is_single_use(logged_in):
+    route = respx.post(SOCIAL).respond(201, json={})
+    with pytest.raises(ValidationError, match="Call linkedin_preview_comment again"):
+        server.linkedin_add_comment("urn:li:share:5", "hi", "deadbeef")
+    p = server.linkedin_preview_comment("urn:li:share:5", "hi")
+    assert p["preview"] == "hi" and "not in the local post log" in p["note"]
+    with pytest.raises(ValidationError):  # edited text
+        server.linkedin_add_comment("urn:li:share:5", "hi!", p["confirm_token"])
+    with pytest.raises(ValidationError):  # other post
+        server.linkedin_add_comment("urn:li:share:6", "hi", p["confirm_token"])
+    assert not route.called
+    server.linkedin_add_comment("urn:li:share:5", "hi", p["confirm_token"])
+    assert json.loads(route.calls.last.request.read()) == {"actor": AUTHOR, "message": {"text": "hi"}}
+    with pytest.raises(ValidationError):  # replay
+        server.linkedin_add_comment("urn:li:share:5", "hi", p["confirm_token"])
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_stale_comment_preview_refused(logged_in):
+    route = respx.post(SOCIAL).respond(201, json={})
+    p = server.linkedin_preview_comment("urn:li:share:5", "hi")
+    server._previews[p["confirm_token"]] -= server.CONFIRM_TTL_SECONDS + 1
+    with pytest.raises(ValidationError, match="does not match a recent preview"):
+        server.linkedin_add_comment("urn:li:share:5", "hi", p["confirm_token"])
+    assert not route.called
+
+
+@respx.mock
+def test_react_wire_format():
+    route = respx.post("https://api.linkedin.com/rest/reactions", params={"actor": AUTHOR}).respond(201)
+    _client_for_tests().react("urn:li:share:5", "PRAISE")
+    req = route.calls.last.request
+    assert req.url.query == b"actor=urn%3Ali%3Aperson%3Aabc"
+    assert req.headers["Linkedin-Version"] == "202609"
+    assert req.headers["X-Restli-Protocol-Version"] == "2.0.0"
+    assert req.headers["Authorization"] == "Bearer SECRET-TOKEN"
+    assert json.loads(req.read()) == {"root": "urn:li:share:5", "reactionType": "PRAISE"}
+
+
+@respx.mock
+def test_unreact_wire_format():
+    route = respx.delete(url__regex=r".*/rest/reactions/.*").respond(204)
+    _client_for_tests().unreact("urn:li:share:5")
+    req = route.calls.last.request
+    assert req.method == "DELETE"
+    assert str(req.url) == (
+        "https://api.linkedin.com/rest/reactions/(actor:urn%3Ali%3Aperson%3Aabc,entity:urn%3Ali%3Ashare%3A5)"
+    )
+    assert req.headers["Linkedin-Version"] == "202609"
+
+
+@respx.mock
+def test_react_tool_validates_and_notes_unknown_urn(logged_in):
+    route = respx.post("https://api.linkedin.com/rest/reactions").respond(201)
+    for bad in ("MAYBE", "nope"):
+        with pytest.raises(ValidationError, match="LIKE, PRAISE"):
+            server.linkedin_react_to_post("urn:li:share:5", bad)
+    assert not route.called
+    out = server.linkedin_react_to_post("urn:li:share:5", "praise")
+    assert out["reacted"] is True and out["reaction"] == "PRAISE" and "post log" in out["note"]
+    assert json.loads(route.calls.last.request.read())["reactionType"] == "PRAISE"
+    unr = respx.delete(url__regex=r".*/rest/reactions/.*").respond(204)
+    out = server.linkedin_react_to_post("urn:li:share:5", remove=True)
+    assert out["reacted"] is False and unr.call_count == 1
+
+
+@respx.mock
+def test_reshare_wire_format_and_token(logged_in):
+    route = respx.post("https://api.linkedin.com/v2/ugcPosts").respond(
+        201, headers={"x-restli-id": "urn:li:share:8"}
+    )
+    p = server.linkedin_preview_post("nice", reshare_of="urn:li:share:5")
+    assert p["reshare_of"] == "urn:li:share:5"
+    assert p["confirm_token"] != server.linkedin_preview_post("nice")["confirm_token"]
+    with pytest.raises(ValidationError):  # token binds the reshare target
+        server.linkedin_publish_post("nice", p["confirm_token"], reshare_of="urn:li:share:6")
+    server.linkedin_publish_post("nice", p["confirm_token"], reshare_of="urn:li:share:5")
+    body = json.loads(route.calls.last.request.read())
+    assert body["responseContext"] == {"parent": "urn:li:share:5"}
+    content = body["specificContent"]["com.linkedin.ugc.ShareContent"]
+    assert content["shareMediaCategory"] == "NONE" and content["shareCommentary"] == {"text": "nice"}
+    assert server.linkedin_list_my_posts()["posts"][0]["reshare_of"] == "urn:li:share:5"
+
+
+def test_plain_post_has_no_response_context_and_token_stable():
+    assert confirm_token("hi", [], "PUBLIC") == confirm_token("hi", [], "PUBLIC", reshare_of=None)
+    with respx.mock:
+        route = respx.post("https://api.linkedin.com/v2/ugcPosts").respond(
+            201, headers={"x-restli-id": "urn:li:share:1"}
+        )
+        _client_for_tests().create_post("hi", "PUBLIC", [])
+    assert "responseContext" not in json.loads(route.calls.last.request.read())
+
+
+def test_reshare_validation(logged_in, img):
+    with pytest.raises(ValidationError, match="only one of them"):
+        server.linkedin_preview_post("hi", image_paths=[img], reshare_of="urn:li:share:5")
+    with pytest.raises(ValidationError, match="only one of them"):
+        server.linkedin_preview_post("hi", link_url="https://a.example", reshare_of="urn:li:share:5")
+    with pytest.raises(ValidationError, match="only one of them"):
+        server.linkedin_publish_post("hi", "x", image_paths=[img], reshare_of="urn:li:share:5")
+    for bad in ("urn:li:person:abc", "https://linkedin.com/x", "share:5"):
+        with pytest.raises(ValidationError, match="reshare_of"):
+            server.linkedin_preview_post("hi", reshare_of=bad)
+    assert server.linkedin_preview_post("hi", reshare_of="urn:li:activity:5")["reshare_of"]
+
+
+EDIT = "https://api.linkedin.com/rest/posts/urn%3Ali%3Ashare%3A5"
+
+
+@respx.mock
+def test_edit_requires_confirm_and_sends_nothing(logged_in, tmp_path):
+    route = respx.post(EDIT).respond(204)
+    with pytest.raises(ValidationError, match="replaces its text") as e:
+        server.linkedin_edit_post("urn:li:share:5", "new")
+    assert "post log" in str(e.value) and not route.called
+    assert _state_log(tmp_path) == ""
+
+
+@respx.mock
+def test_edit_wire_format_and_log(logged_in, tmp_path):
+    route = respx.post(EDIT).respond(204)
+    server.postlog.record({"urn": "urn:li:share:5", "text": "old", "ts": 1})
+    out = server.linkedin_edit_post("urn:li:share:5", " new text ", confirm=True)
+    assert out["edited"] is True and out["url"].endswith("urn:li:share:5/") and "note" not in out
+    req = route.calls.last.request
+    assert req.headers["X-RestLi-Method"] == "PARTIAL_UPDATE"
+    assert req.headers["Linkedin-Version"] == "202609"
+    assert req.headers["X-Restli-Protocol-Version"] == "2.0.0"
+    assert json.loads(req.read()) == {"patch": {"$set": {"commentary": "new text"}}}
+    entry = json.loads(_state_log(tmp_path).splitlines()[-1])
+    assert entry["edited"] == "urn:li:share:5" and entry["text"] == "new text"
+    assert server.postlog.posts()[0]["text"] == "old"  # the original record is untouched
+
+
+@respx.mock
+def test_mention_publish_sends_plain_text_and_attributes(logged_in):
+    route = respx.post("https://api.linkedin.com/v2/ugcPosts").respond(
+        201, headers={"x-restli-id": "urn:li:share:9"}
+    )
+    raw = "Thanks @[Acme Corp](urn:li:organization:123) and @[Jo](urn:li:person:AbC)!"
+    p = server.linkedin_preview_post(raw)
+    assert p["preview"] == "Thanks Acme Corp and Jo!"
+    assert p["mentions"] == [
+        {"name": "Acme Corp", "urn": "urn:li:organization:123"},
+        {"name": "Jo", "urn": "urn:li:person:AbC"},
+    ]
+    assert p["confirm_token"] == confirm_token(raw, [], "PUBLIC")  # token binds the raw text
+    server.linkedin_publish_post(raw, p["confirm_token"])
+    content = json.loads(route.calls.last.request.read())["specificContent"]["com.linkedin.ugc.ShareContent"]
+    assert content["shareCommentary"] == {
+        "text": "Thanks Acme Corp and Jo!",
+        "attributes": [
+            {
+                "start": 7,
+                "length": 9,
+                "value": {
+                    "com.linkedin.common.CompanyAttributedEntity": {"company": "urn:li:organization:123"}
+                },
+            },
+            {
+                "start": 21,
+                "length": 2,
+                "value": {"com.linkedin.common.MemberAttributedEntity": {"member": "urn:li:person:AbC"}},
+            },
+        ],
+    }
+    assert server.linkedin_list_my_posts()["posts"][0]["text"] == "Thanks Acme Corp and Jo!"

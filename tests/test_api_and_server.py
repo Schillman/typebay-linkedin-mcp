@@ -7,7 +7,7 @@ import pytest
 import respx
 
 from typebay_linkedin_mcp import api, server, store
-from typebay_linkedin_mcp.api import LinkedInClient, LinkedInError
+from typebay_linkedin_mcp.api import LinkedInClient, LinkedInError, LinkedInUnknownOutcome
 from typebay_linkedin_mcp.safety import Link, ValidationError, validate_images, validate_video
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 32
@@ -423,3 +423,38 @@ def test_preview_reports_video_and_publish_logs_it(logged_in, mp4, monkeypatch):
     out = server.linkedin_publish_post("hi", p["confirm_token"], video_path=mp4)
     assert out["urn"] == "urn:li:ugcPost:7"
     assert server.linkedin_list_my_posts()["posts"][0]["video"] == p["video"]
+
+
+def _state_log(tmp_path):
+    f = tmp_path / "posts.jsonl"
+    return f.read_text() if f.exists() else ""
+
+
+@respx.mock
+def test_publish_timeout_is_unknown_outcome(logged_in, tmp_path):
+    respx.post("https://api.linkedin.com/v2/ugcPosts").mock(side_effect=httpx.ConnectTimeout("x"))
+    p = server.linkedin_preview_post("hello")
+    with pytest.raises(LinkedInUnknownOutcome, match="may still have been published"):
+        server.linkedin_publish_post("hello", p["confirm_token"])
+    assert p["confirm_token"] not in server._previews
+    assert '"unknown_outcome": true' in _state_log(tmp_path)
+    assert server.postlog.posts() == []
+
+
+@respx.mock
+def test_upload_timeout_keeps_preview_and_logs_nothing(logged_in, img, tmp_path):
+    respx.post("https://api.linkedin.com/v2/assets?action=registerUpload").mock(
+        side_effect=httpx.ReadTimeout("x")
+    )
+    p = server.linkedin_preview_post("hello", image_paths=[img])
+    with pytest.raises(LinkedInError) as ei:
+        server.linkedin_publish_post("hello", p["confirm_token"], image_paths=[img])
+    assert not isinstance(ei.value, LinkedInUnknownOutcome)
+    assert p["confirm_token"] in server._previews
+    assert _state_log(tmp_path) == ""
+
+
+def test_preview_prunes_expired_tokens(logged_in):
+    server._previews["stale"] = time.time() - server.CONFIRM_TTL_SECONDS - 1
+    p = server.linkedin_preview_post("hello")
+    assert "stale" not in server._previews and p["confirm_token"] in server._previews

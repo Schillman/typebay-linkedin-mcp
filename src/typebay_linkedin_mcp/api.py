@@ -24,6 +24,10 @@ class LinkedInError(ToolError):
     """Raised with a message that is safe to show the user. Never contains tokens."""
 
 
+class LinkedInUnknownOutcome(LinkedInError):
+    """The request may have reached LinkedIn; the post may exist."""
+
+
 def error_message(resp: httpx.Response) -> str:
     """The `message` field of a JSON error body, or "". Never falls back to raw text."""
     try:
@@ -61,8 +65,17 @@ class LinkedInClient:
         self._auth = {"Authorization": f"Bearer {access_token}"}
         self._headers = {**self._auth, "X-Restli-Protocol-Version": "2.0.0"}
 
-    def _request(self, method: str, url: str, **kw) -> httpx.Response:
-        resp = self._http.request(method, url, headers=self._headers, **kw)
+    def _request(self, method: str, url: str, unknown_outcome: bool = False, **kw) -> httpx.Response:
+        try:
+            resp = self._http.request(method, url, headers=self._headers, **kw)
+        except httpx.TransportError as e:
+            log.debug("Transport error on %s %s: %r", method, url, e)
+            if unknown_outcome:
+                raise LinkedInUnknownOutcome(
+                    "LinkedIn did not answer while publishing. The post may still have been published: "
+                    "check your feed before previewing again."
+                ) from None
+            raise LinkedInError("LinkedIn did not answer (network error or timeout). Try again.") from None
         if resp.status_code >= 400:
             raise LinkedInError(_explain(resp))
         return resp
@@ -86,9 +99,12 @@ class LinkedInClient:
         """Register, then upload. Returns the digitalmediaAsset URN."""
         value = self._register_upload("urn:li:digitalmediaRecipe:feedshare-image")
         upload_url = value["uploadMechanism"][_UPLOAD_KEY]["uploadUrl"]
-        put = self._http.put(
-            upload_url, content=strip_metadata(image.path.read_bytes(), image.mime), headers=self._auth
-        )
+        try:
+            put = self._http.put(
+                upload_url, content=strip_metadata(image.path.read_bytes(), image.mime), headers=self._auth
+            )
+        except httpx.TransportError:
+            raise LinkedInError("Image upload failed (network error or timeout). Try again.") from None
         if put.status_code >= 400:
             raise LinkedInError(f"Image upload failed ({put.status_code}).")
         return value["asset"]
@@ -97,8 +113,11 @@ class LinkedInClient:
         """Register, stream the file, then poll until the asset is AVAILABLE. Returns the asset URN."""
         value = self._register_upload("urn:li:digitalmediaRecipe:feedshare-video")
         upload_url = value["uploadMechanism"][_UPLOAD_KEY]["uploadUrl"]
-        with video.path.open("rb") as f:
-            put = self._http.put(upload_url, content=f, headers=self._auth)
+        try:
+            with video.path.open("rb") as f:
+                put = self._http.put(upload_url, content=f, headers=self._auth)
+        except httpx.TransportError:
+            raise LinkedInError("Video upload failed (network error or timeout). Try again.") from None
         if put.status_code >= 400:
             raise LinkedInError(f"Video upload failed ({put.status_code}).")
         asset = value["asset"]
@@ -158,7 +177,7 @@ class LinkedInClient:
             "specificContent": {"com.linkedin.ugc.ShareContent": content},
             "visibility": {"com.linkedin.ugc.MemberNetworkVisibility": visibility},
         }
-        return self._request("POST", "/v2/ugcPosts", json=body).headers["x-restli-id"]
+        return self._request("POST", "/v2/ugcPosts", unknown_outcome=True, json=body).headers["x-restli-id"]
 
     def add_comment(self, post_urn: str, text: str) -> None:
         quoted = urllib.parse.quote(post_urn, safe="")

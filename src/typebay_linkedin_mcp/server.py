@@ -9,7 +9,7 @@ from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 from . import postlog, store
-from .api import LinkedInClient, LinkedInError, post_url
+from .api import LinkedInClient, LinkedInError, LinkedInUnknownOutcome, post_url
 from .auth import introspect
 from .config import CONFIRM_TTL_SECONDS
 from .safety import (
@@ -199,7 +199,10 @@ def linkedin_preview_post(
         text, image_paths, alt_texts, visibility, link_url, link_title, link_description, video_path
     )
     token = make_confirm_token(text, images, visibility, link, video)
-    _previews[token] = time.time()
+    now = time.time()
+    for t in [t for t, issued in _previews.items() if now - issued > CONFIRM_TTL_SECONDS]:
+        del _previews[t]
+    _previews[token] = now
     out: PreviewResult = {
         "preview": text,
         "characters": len(text),
@@ -244,7 +247,12 @@ def linkedin_publish_post(
     issued = _previews.get(expected)
     if confirm_token != expected or issued is None or time.time() - issued > CONFIRM_TTL_SECONDS:
         raise ValidationError("Content does not match a recent preview. Call linkedin_preview_post again.")
-    urn = _client().create_post(text, visibility, images, link, video)
+    try:
+        urn = _client().create_post(text, visibility, images, link, video)
+    except LinkedInUnknownOutcome:
+        _previews.pop(expected, None)  # never retry a publish that may have landed
+        _log_record({"unknown_outcome": True, "text": text, "visibility": visibility, "ts": int(time.time())})
+        raise
     _previews.pop(expected, None)  # one publish per preview
     _log_record(
         {

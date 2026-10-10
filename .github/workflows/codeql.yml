@@ -9,6 +9,8 @@ permissions:
   contents: read
 jobs:
   analyze:
+    # code scanning needs GitHub Code Security on private repos, which personal accounts cannot enable
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

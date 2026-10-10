@@ -2,6 +2,7 @@ name: ci
 on: [push, pull_request]
 permissions:
   contents: read
+  pull-requests: read # gitleaks lists PR commits over the API
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
